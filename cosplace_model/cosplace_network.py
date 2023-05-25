@@ -88,7 +88,7 @@ def get_backbone(backbone_name : str) -> Tuple[torch.nn.Module, int]:
         logging.debug(f"Train only layer3 and layer4 of the {backbone_name}, freeze the previous ones")
         layers = list(backbone.children())[:-2]  # Remove avg pooling and FC layer
 
-    elif backbone_name.startswith("maxvit_t"): ##NOT WORKING
+    elif backbone_name.startswith("maxvit_t"): # still to try it out
         layers = list(backbone.children())[:-2] # Remove avg pooling and FC layer
         for x in layers:
             for p in x.parameters():
