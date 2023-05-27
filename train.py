@@ -93,10 +93,10 @@ if args.augmentation_device == "cuda":
                                                           scale=[1-args.random_resized_crop, 1]),
             augmentations.DeviceAgnosticAutoAugment(policy = T.AutoAugmentPolicy.IMAGENET,
                                                     interpolation = T.InterpolationMode.NEAREST),
-            augmentations.DeviceAgnosticAutoAugment(policy = T.AutoAugmentPolicy.CIFAR10,
-                                                    interpolation = T.InterpolationMode.NEAREST),
-            augmentations.DeviceAgnosticAutoAugment(policy = T.AutoAugmentPolicy.SVHN,
-                                                    interpolation = T.InterpolationMode.NEAREST),
+            #augmentations.DeviceAgnosticAutoAugment(policy = T.AutoAugmentPolicy.CIFAR10,
+            #                                        interpolation = T.InterpolationMode.NEAREST),
+            #augmentations.DeviceAgnosticAutoAugment(policy = T.AutoAugmentPolicy.SVHN,
+            #                                        interpolation = T.InterpolationMode.NEAREST),
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
 
