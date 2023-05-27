@@ -45,10 +45,7 @@ class DeviceAgnosticAutoAugment(T.AutoAugment):
         B, C, H, W = images.shape
 
         # Convert torch.Tensor to PIL images
-        if torch.cuda.is_available():
-            pil_images = [T.ToPILImage()(img.cuda()) for img in images]
-        else:
-            pil_images = [T.ToPILImage()(img.cpu()) for img in images]
+        pil_images = [T.ToPILImage()(img.cpu()) for img in images]
 
         # Apply AutoAugment transformations
         autoaugment_transform = T.AutoAugment(policy=self.policy, interpolation=self.interpolation).to(images.device)
