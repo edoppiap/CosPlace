@@ -4,9 +4,9 @@ from typing import Tuple, Union
 import torchvision.transforms as T
 
 AUTOAUGMENT_POLICY = {
-    "imagenet": T.AutoAugmentPolicy.IMAGENET,
-    "cifar10": T.AutoAugmentPolicy.CIFAR10,
-    "svhn": T.AutoAugmentPolicy.SVHN
+    "IMAGENET": T.AutoAugmentPolicy.IMAGENET,
+    "CIFAR10": T.AutoAugmentPolicy.CIFAR10,
+    "SVHN": T.AutoAugmentPolicy.SVHN
 }
 
 
@@ -42,7 +42,7 @@ class DeviceAgnosticRandomResizedCrop(T.RandomResizedCrop):
     
 class DeviceAgnosticAutoAugment(T.AutoAugment):
     def __init__(self, policy_name: str, interpolation: T.InterpolationMode):
-        assert policy_name.lower() in AUTOAUGMENT_POLICY, f"Policy must be one of {list(AUTOAUGMENT_POLICY.keys())}"
+        assert policy_name in AUTOAUGMENT_POLICY, f"Policy must be one of {list(AUTOAUGMENT_POLICY.keys())}"
         policy = AUTOAUGMENT_POLICY.get(policy_name)
         """This is the same as T.AutoAugment but it only accepts batches of images and works on GPU"""
         super(DeviceAgnosticAutoAugment, self).__init__(policy=policy, interpolation=interpolation)
