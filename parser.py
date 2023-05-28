@@ -34,6 +34,9 @@ def parse_arguments(is_training: bool = True):
     parser.add_argument("--hue", type=float, default=0.5, help="_")
     parser.add_argument("--saturation", type=float, default=0.7, help="_")
     parser.add_argument("--random_resized_crop", type=float, default=0.5, help="_")
+    parser.add_argument("--autoaugment_policy", type=str, default=None,
+                        choices=["IMAGENET", "CIFAR10", "SVHN"], nargs="+",
+                        help="Policy for AutoAugment augmentations (you can pick more than one)")
     # Validation / test parameters
     parser.add_argument("--infer_batch_size", type=int, default=16,
                         help="Batch size for inference (validating and testing)")

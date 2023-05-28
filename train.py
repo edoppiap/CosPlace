@@ -84,15 +84,21 @@ logging.info(f"There are {len(groups[0])} classes for the first group, " +
 
 
 if args.augmentation_device == "cuda":
-    gpu_augmentation = T.Compose([
-            augmentations.DeviceAgnosticColorJitter(brightness=args.brightness,
+    compose = []
+    compose.append(augmentations.DeviceAgnosticColorJitter(brightness=args.brightness,
                                                     contrast=args.contrast,
                                                     saturation=args.saturation,
-                                                    hue=args.hue),
-            augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
-                                                          scale=[1-args.random_resized_crop, 1]),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+                                                    hue=args.hue))
+    compose.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
+                                                          scale=[1-args.random_resized_crop, 1]))
+    if args.autoaugment_policy:
+        for policy_name in args.autoaugment_policy: # it can be more than one
+            logging.info(f"Selected AutoAugment policy: {policy_name}")
+            compose.append(augmentations.DeviceAgnosticAutoAugment(policy_name = policy_name,
+                                                    interpolation = T.InterpolationMode.NEAREST))
+    compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
+    
+    gpu_augmentation = T.Compose(compose)
 
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
