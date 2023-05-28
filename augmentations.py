@@ -3,6 +3,12 @@ import torch
 from typing import Tuple, Union
 import torchvision.transforms as T
 
+AUTOAUGMENT_POLICY = {
+    "imagenet": T.AutoAugmentPolicy.IMAGENET,
+    "cifar10": T.AutoAugmentPolicy.CIFAR10,
+    "svhn": T.AutoAugmentPolicy.SVHN
+}
+
 
 class DeviceAgnosticColorJitter(T.ColorJitter):
     def __init__(self, brightness: float = 0., contrast: float = 0., saturation: float = 0., hue: float = 0.):
@@ -35,7 +41,9 @@ class DeviceAgnosticRandomResizedCrop(T.RandomResizedCrop):
         return augmented_images
     
 class DeviceAgnosticAutoAugment(T.AutoAugment):
-    def __init__(self, policy: T.AutoAugmentPolicy, interpolation: T.InterpolationMode):
+    def __init__(self, policy_name: str, interpolation: T.InterpolationMode):
+        assert policy_name.lower() in AUTOAUGMENT_POLICY, f"Policy must be one of {list(AUTOAUGMENT_POLICY.keys())}"
+        policy = AUTOAUGMENT_POLICY.get(policy_name)
         """This is the same as T.AutoAugment but it only accepts batches of images and works on GPU"""
         super(DeviceAgnosticAutoAugment, self).__init__(policy=policy, interpolation=interpolation)
 
