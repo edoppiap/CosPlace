@@ -91,6 +91,8 @@ if args.augmentation_device == "cuda":
                                                     hue=args.hue))
     compose.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
                                                           scale=[1-args.random_resized_crop, 1]))
+    compose.append(augmentations.DeviceAgnosticRandomHorizontalFlip(args.horizontal_flip_prob))
+    compose.append(T.RandomVerticalFlip())
     if args.autoaugment_policy:
         for policy_name in args.autoaugment_policy: # it can be more than one
             logging.info(f"Selected AutoAugment policy: {policy_name}")
