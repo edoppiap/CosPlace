@@ -44,8 +44,13 @@ model = model.to(args.device).train()
 #### Optimizer
 criterion = torch.nn.CrossEntropyLoss()
 #UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
-#model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-model_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+if args.optimizer == "Adam":
+    model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+elif args.optimizer == "AdamW":
+    model_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+elif args.optimizer == "SGD":
+    model_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
+    
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
                        current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]

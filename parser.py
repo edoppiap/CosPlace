@@ -17,6 +17,9 @@ def parse_arguments(is_training: bool = True):
                         choices=["VGG16", "ResNet18", "ResNet50", "ResNet101", "ResNet152", "vit_b_16", "vit_b_32", "vit_l_16", "vit_l_32", "vit_h_14", "maxvit_t"], help="_")
     parser.add_argument("--fc_output_dim", type=int, default=512,
                         help="Output dimension of final fully connected layer")
+    # Optimizer
+    parser.add_argument("--optimizer", type=str, default='AdamW',
+                        choices=["AdamW","Adam","SGD"], help="Optimizer to use")
     # Training parameters
     parser.add_argument("--use_amp16", action="store_true",
                         help="use Automatic Mixed Precision")
