@@ -50,6 +50,12 @@ elif args.optimizer == "AdamW":
     model_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 elif args.optimizer == "SGD":
     model_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
+elif args.optimizer == "Adagrad":
+    model_optimizer = torch.optim.Adagrad(model.parameters(), lr=args.lr)
+elif args.optimizer == "LBFGS":
+    model_optimizer = torch.optim.LBFGS(model.parameters, lr=args.lr)
+elif args.optimizer == "Adadelta":
+    model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
     
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,

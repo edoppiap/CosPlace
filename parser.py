@@ -19,7 +19,8 @@ def parse_arguments(is_training: bool = True):
                         help="Output dimension of final fully connected layer")
     # Optimizer
     parser.add_argument("--optimizer", type=str, default='AdamW',
-                        choices=["AdamW","Adam","SGD"], help="Optimizer to use")
+                        choices=["AdamW","Adam","SGD","Adagrad","LBFGS","Adadelta"], 
+                        help="Optimizer to use")
     # Training parameters
     parser.add_argument("--use_amp16", action="store_true",
                         help="use Automatic Mixed Precision")
