@@ -53,7 +53,7 @@ elif args.optimizer == "SGD":
 elif args.optimizer == "Adagrad":
     model_optimizer = torch.optim.Adagrad(model.parameters(), lr=args.lr)
 elif args.optimizer == "LBFGS":
-    model_optimizer = torch.optim.LBFGS(model.parameters, lr=args.lr)
+    model_optimizer = torch.optim.LBFGS(model.parameters(), lr=args.lr)
 elif args.optimizer == "Adadelta":
     model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
     
