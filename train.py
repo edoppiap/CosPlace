@@ -56,6 +56,19 @@ elif args.optimizer == "LBFGS":
     model_optimizer = torch.optim.LBFGS(model.parameters(), lr=args.lr)
 elif args.optimizer == "Adadelta":
     model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
+
+### Scheduler
+if args.scheduler == 'StepLR':
+    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
+elif args.scheduler == 'ReduceLROnPlateau':
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min')
+elif args.scheduler == 'CosineAnnealingLR':
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
+# Add more elif conditions for other schedulers you want to use
+elif args.scheduler == 'ExponentialLR':
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
+else:
+    print("Invalid scheduler choice")
     
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
