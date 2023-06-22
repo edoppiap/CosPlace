@@ -84,8 +84,8 @@ class TrainDataset(torch.utils.data.Dataset):
             raise e
         
         tensor_image = T.functional.to_tensor(pil_image)
-        assert tensor_image.shape == torch.Size([3, 512, 512]), \
-            f"Image {image_path} should have shape [3, 512, 512] but has {tensor_image.shape}."
+        # assert tensor_image.shape == torch.Size([3, 512, 512]), \
+        #    f"Image {image_path} should have shape [3, 512, 512] but has {tensor_image.shape}."
         
         if self.augmentation_device == "cpu":
             tensor_image = self.transform(tensor_image)

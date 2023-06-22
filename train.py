@@ -57,7 +57,6 @@ elif args.optimizer == "LBFGS":
 elif args.optimizer == "Adadelta":
     model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
 
-
 ### Scheduler
 if args.scheduler == 'StepLR':
     scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
@@ -70,7 +69,6 @@ elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
     print("Invalid scheduler choice")
-
     
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
