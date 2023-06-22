@@ -14,9 +14,19 @@ def parse_arguments(is_training: bool = True):
     parser.add_argument("--min_images_per_class", type=int, default=10, help="_")
     # Model parameters
     parser.add_argument("--backbone", type=str, default="ResNet18",
-                        choices=["VGG16", "ResNet18", "ResNet50", "ResNet101", "ResNet152"], help="_")
+                        choices=["VGG16", "ResNet18", "ResNet50", "ResNet101", "ResNet152", "vit_b_16", "vit_b_32", "vit_l_16", "vit_l_32", "vit_h_14", "maxvit_t"], help="_")
     parser.add_argument("--fc_output_dim", type=int, default=512,
                         help="Output dimension of final fully connected layer")
+    # Optimizer
+    parser.add_argument("--optimizer", type=str, default='AdamW',
+                        choices=["AdamW","Adam","SGD","Adagrad","LBFGS","Adadelta"], 
+                        help="Optimizer to use")
+    
+    # Scheduler
+    parser.add_argument('--scheduler', type=str, default='none', 
+                        choices=["StepLR","ReduceLROnPlateau","CosineAnnealignLR","ExponentialLR"],
+                        help='scheduler to use')
+
     # Training parameters
     parser.add_argument("--use_amp16", action="store_true",
                         help="use Automatic Mixed Precision")
@@ -34,6 +44,10 @@ def parse_arguments(is_training: bool = True):
     parser.add_argument("--hue", type=float, default=0.5, help="_")
     parser.add_argument("--saturation", type=float, default=0.7, help="_")
     parser.add_argument("--random_resized_crop", type=float, default=0.5, help="_")
+    parser.add_argument("--horizontal_flip_prob", type=float, default=0.5, help="_")
+    parser.add_argument("--autoaugment_policy", type=str, default=None,
+                        choices=["IMAGENET", "CIFAR10", "SVHN"], nargs="+",
+                        help="Policy for AutoAugment augmentations (you can pick more than one)")
     # Validation / test parameters
     parser.add_argument("--infer_batch_size", type=int, default=16,
                         help="Batch size for inference (validating and testing)")

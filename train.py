@@ -43,21 +43,50 @@ model = model.to(args.device).train()
 
 #### Optimizer
 criterion = torch.nn.CrossEntropyLoss()
-model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+#UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
+if args.optimizer == "Adam":
+    model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+elif args.optimizer == "AdamW":
+    model_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+elif args.optimizer == "SGD":
+    model_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
+elif args.optimizer == "Adagrad":
+    model_optimizer = torch.optim.Adagrad(model.parameters(), lr=args.lr)
+elif args.optimizer == "LBFGS":
+    model_optimizer = torch.optim.LBFGS(model.parameters(), lr=args.lr)
+elif args.optimizer == "Adadelta":
+    model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
 
+
+### Scheduler
+if args.scheduler == 'StepLR':
+    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
+elif args.scheduler == 'ReduceLROnPlateau':
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min')
+elif args.scheduler == 'CosineAnnealingLR':
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
+# Add more elif conditions for other schedulers you want to use
+elif args.scheduler == 'ExponentialLR':
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
+else:
+    print("Invalid scheduler choice")
+
+    
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
                        current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]
 # Each group has its own classifier, which depends on the number of classes in the group
 classifiers = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups]
-classifiers_optimizers = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
+#UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
+#classifiers_optimizers = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
+classifiers_optimizers = [torch.optim.AdamW(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
 
 logging.info(f"Using {len(groups)} groups")
 logging.info(f"The {len(groups)} groups have respectively the following number of classes {[len(g) for g in groups]}")
 logging.info(f"The {len(groups)} groups have respectively the following number of images {[g.get_images_num() for g in groups]}")
 
 val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_dist_threshold)
-test_ds = TestDataset(args.test_set_folder, queries_folder="queries_v1",
+test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
                       positive_dist_threshold=args.positive_dist_threshold)
 logging.info(f"Validation set: {val_ds}")
 logging.info(f"Test set: {test_ds}")
@@ -81,15 +110,23 @@ logging.info(f"There are {len(groups[0])} classes for the first group, " +
 
 
 if args.augmentation_device == "cuda":
-    gpu_augmentation = T.Compose([
-            augmentations.DeviceAgnosticColorJitter(brightness=args.brightness,
+    compose = []
+    compose.append(augmentations.DeviceAgnosticColorJitter(brightness=args.brightness,
                                                     contrast=args.contrast,
                                                     saturation=args.saturation,
-                                                    hue=args.hue),
-            augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
-                                                          scale=[1-args.random_resized_crop, 1]),
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
+                                                    hue=args.hue))
+    compose.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
+                                                          scale=[1-args.random_resized_crop, 1]))
+    compose.append(augmentations.DeviceAgnosticRandomHorizontalFlip(args.horizontal_flip_prob))
+    compose.append(T.RandomVerticalFlip())
+    if args.autoaugment_policy:
+        for policy_name in args.autoaugment_policy: # it can be more than one
+            logging.info(f"Selected AutoAugment policy: {policy_name}")
+            compose.append(augmentations.DeviceAgnosticAutoAugment(policy_name = policy_name,
+                                                    interpolation = T.InterpolationMode.NEAREST))
+    compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
+    
+    gpu_augmentation = T.Compose(compose)
 
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
