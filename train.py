@@ -74,11 +74,11 @@ else:
 
 ### Loss 
 if args.loss == 'CrossEntropyLoss':
-    criterion = torch.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss()
 elif args.loss == 'L1loss':
-    criterion = torch.L1Loss()
+    criterion = torch.nn.L1Loss()
 elif args.loss == 'MSELoss':
-    criterion = torch.MSELoss()
+    criterion = torch.nn.MSELoss()
 elif args.loss == 'TripletLoss':
     criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)
 elif args.loss == 'ContrastiveLoss':
