@@ -44,7 +44,7 @@ if args.resume_model is not None:
 model = model.to(args.device).train()
 
 #### Optimizer
-criterion = torch.nn.CrossEntropyLoss()
+# 
 #UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
 if args.optimizer == "Adam":
     model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -74,15 +74,15 @@ else:
 
 ### Loss 
 if args.loss == 'CrossEntropyLoss':
-    loss = torch.CrossEntropyLoss()
+    criterion = torch.CrossEntropyLoss()
 elif args.loss == 'L1loss':
-    loss = torch.L1Loss()
+    criterion = torch.L1Loss()
 elif args.loss == 'MSELoss':
-    loss = torch.MSELoss()
+    criterion = torch.MSELoss()
 elif args.loss == 'TripletLoss':
-    loss = torch.nn.TripletMarginLoss(margin=1.0, p=2)
+    criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)
 elif args.loss == 'ContrastiveLoss':
-    loss = losses.ContrastiveLoss()
+    criterion = losses.ContrastiveLoss()
 
     
 #### Datasets

@@ -28,7 +28,7 @@ def parse_arguments(is_training: bool = True):
                         help='scheduler to use')
     
     #Loss
-    parser.add_argument('--loss', type=str, default='none', 
+    parser.add_argument('--loss', type=str, default='CrossEntropyLoss', 
                         choices=["CrossEntropyLoss", "L1loss", "MSELoss","ContrastiveLoss", "TripletLoss"], 
                         help='loss to use')
 
