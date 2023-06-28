@@ -7,6 +7,8 @@ from tqdm import tqdm
 import multiprocessing
 from datetime import datetime
 import torchvision.transforms as T
+from pytorch_metric_learning import losses
+
 
 import test
 import util
@@ -69,6 +71,19 @@ elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
     print("Invalid scheduler choice")
+
+### Loss 
+if args.loss == 'CrossEntropyLoss':
+    loss = torch.CrossEntropyLoss()
+elif args.loss == 'L1loss':
+    loss = torch.L1Loss()
+elif args.loss == 'MSELoss':
+    loss = torch.MSELoss()
+elif args.loss == 'TripletLoss':
+    loss = losses.TripletMarginLoss(margin=1.0, p=2)
+elif args.loss == 'ContrastiveLoss':
+    loss = losses.ContrastiveLoss()
+
     
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
