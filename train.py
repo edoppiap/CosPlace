@@ -44,8 +44,32 @@ model = model.to(args.device).train()
 #### Optimizer
 criterion = torch.nn.CrossEntropyLoss()
 #UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
-#model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-model_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+if args.optimizer == "Adam":
+    model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+elif args.optimizer == "AdamW":
+    model_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+elif args.optimizer == "SGD":
+    model_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
+elif args.optimizer == "Adagrad":
+    model_optimizer = torch.optim.Adagrad(model.parameters(), lr=args.lr)
+elif args.optimizer == "LBFGS":
+    model_optimizer = torch.optim.LBFGS(model.parameters(), lr=args.lr)
+elif args.optimizer == "Adadelta":
+    model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
+
+### Scheduler
+if args.scheduler == 'StepLR':
+    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
+elif args.scheduler == 'ReduceLROnPlateau':
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min')
+elif args.scheduler == 'CosineAnnealingLR':
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
+# Add more elif conditions for other schedulers you want to use
+elif args.scheduler == 'ExponentialLR':
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
+else:
+    print("Invalid scheduler choice")
+    
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
                        current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]
@@ -91,6 +115,8 @@ if args.augmentation_device == "cuda":
                                                     hue=args.hue))
     compose.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
                                                           scale=[1-args.random_resized_crop, 1]))
+    compose.append(augmentations.DeviceAgnosticRandomHorizontalFlip(args.horizontal_flip_prob))
+    compose.append(T.RandomVerticalFlip(args.vertical_flip_prob))
     if args.autoaugment_policy:
         for policy_name in args.autoaugment_policy: # it can be more than one
             logging.info(f"Selected AutoAugment policy: {policy_name}")

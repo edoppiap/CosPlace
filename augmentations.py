@@ -64,6 +64,18 @@ class DeviceAgnosticAutoAugment(T.AutoAugment):
 
         assert augmented_images.shape == torch.Size([B, C, H, W])
         return augmented_images
+    
+class DeviceAgnosticRandomHorizontalFlip(T.RandomHorizontalFlip):
+  def __init__(self, p: float):
+    super().__init__(p=p)
+
+  def forward(self, images: torch.Tensor) -> torch.Tensor:
+    assert len(images.shape) == 4, f"images should be a batch of images, but it has shape {images.shape}"
+    B, C, H, W = images.shape
+    random_horizontal_flip = super(DeviceAgnosticRandomHorizontalFlip, self).forward
+    augmented_images = [random_horizontal_flip(img).unsqueeze(0) for img in images]
+    augmented_images = torch.cat(augmented_images)
+    return augmented_images
 
 if __name__ == "__main__":
     """
