@@ -80,7 +80,7 @@ elif args.loss == 'L1loss':
 elif args.loss == 'MSELoss':
     criterion = torch.nn.MSELoss()
 elif args.loss == 'TripletLoss':
-    criterion = torch.nn.TripletMarginLoss(margin=1.0, p=2)
+    criterion = losses.TripletMarginLoss()
 elif args.loss == 'ContrastiveLoss':
     criterion = losses.ContrastiveLoss()
 
