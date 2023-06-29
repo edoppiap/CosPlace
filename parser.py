@@ -23,7 +23,7 @@ def parse_arguments(is_training: bool = True):
                         help="Optimizer to use")
     
     # Scheduler
-    parser.add_argument('--scheduler', type=str, default='none', 
+    parser.add_argument('--scheduler', type=str, default=None, 
                         choices=["StepLR","ReduceLROnPlateau","CosineAnnealignLR","ExponentialLR"],
                         help='scheduler to use')
     

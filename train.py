@@ -70,7 +70,7 @@ elif args.scheduler == 'CosineAnnealingLR':
 elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
-    print("Invalid scheduler choice")
+    scheduler = None
 
 ### Loss 
 if args.loss == 'CrossEntropyLoss':
@@ -180,7 +180,8 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             del loss, output, images
             model_optimizer.step()
             classifiers_optimizers[current_group_num].step()
-            scheduler.step()
+            if not scheduler == None:
+                scheduler.step()
         else:  # Use AMP 16
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
@@ -192,13 +193,16 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             scaler.step(model_optimizer)
             scaler.step(classifiers_optimizers[current_group_num])
             scaler.update()
-            scheduler.step()
+            if not scheduler == None:
+                scheduler.step()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
     
     logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
                   f"loss = {epoch_losses.mean():.4f}")
+    if not scheduler == None:
+        logging.debug(f"Scheduler step = {scheduler.get_last_lr()}")
     
     #### Evaluation
     recalls, recalls_str = test.test(args, val_ds, model)
