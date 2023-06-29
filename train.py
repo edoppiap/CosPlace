@@ -180,6 +180,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             del loss, output, images
             model_optimizer.step()
             classifiers_optimizers[current_group_num].step()
+            scheduler.step()
         else:  # Use AMP 16
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
@@ -191,6 +192,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             scaler.step(model_optimizer)
             scaler.step(classifiers_optimizers[current_group_num])
             scaler.update()
+            scheduler.step()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
