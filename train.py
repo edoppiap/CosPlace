@@ -202,7 +202,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
     logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
                   f"loss = {epoch_losses.mean():.4f}")
     if not scheduler == None:
-        logging.debug(f"Scaling factor = {scheduler.get_scale()}")
+        logging.debug(f"Scheduler step = {scheduler.get_last_lr()}")
     
     #### Evaluation
     recalls, recalls_str = test.test(args, val_ds, model)
