@@ -63,7 +63,7 @@ elif args.optimizer == "Adadelta":
 if args.scheduler == 'StepLR':
     scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
 elif args.scheduler == 'ReduceLROnPlateau':
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min') ## da aggiustare
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min') 
 elif args.scheduler == 'CosineAnnealignLR':
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
 # Add more elif conditions for other schedulers you want to use
@@ -192,7 +192,6 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             scaler.step(classifiers_optimizers[current_group_num])
             scale = scaler.get_scale()
             scaler.update()
-            skip_scheduler = scale > scaler.get_scale()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
@@ -200,7 +199,10 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
     logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
                   f"loss = {epoch_losses.mean():.4f}")
     if scheduler is not None:
-        scheduler.step(epoch_losses.mean())
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(epoch_losses.mean())
+        else:
+            scheduler.step()
     
     #### Evaluation
     recalls, recalls_str = test.test(args, val_ds, model)
