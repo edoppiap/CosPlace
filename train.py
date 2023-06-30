@@ -201,8 +201,6 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
                   f"loss = {epoch_losses.mean():.4f}")
     if scheduler is not None:
         scheduler.step(epoch_losses.mean())
-    if not scheduler == None:
-        logging.debug(f"Scheduler step = {scheduler.get_last_lr()}")
     
     #### Evaluation
     recalls, recalls_str = test.test(args, val_ds, model)
