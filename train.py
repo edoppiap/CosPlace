@@ -196,7 +196,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             scaler.update()
             skip_scheduler = scale > scaler.get_scale()
             if scheduler is not None and not skip_scheduler:
-                scheduler.step(loss)
+                scheduler.step()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
