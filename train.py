@@ -76,7 +76,7 @@ else:
 if args.loss == 'CrossEntropyLoss':
     criterion = torch.nn.CrossEntropyLoss()
 elif args.loss == 'L1loss':
-    criterion = torch.nn.L1Loss(reduction='none')
+    criterion = torch.nn.L1Loss()
 elif args.loss == 'MSELoss':
     criterion = torch.nn.MSELoss()
 elif args.loss == 'TripletLoss':
