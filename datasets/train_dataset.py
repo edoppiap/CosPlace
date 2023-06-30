@@ -1,4 +1,3 @@
-
 import os
 import torch
 import random
@@ -19,7 +18,7 @@ def open_image(path):
 
 class TrainDataset(torch.utils.data.Dataset):
     def __init__(self, args, dataset_folder, M=10, alpha=30, N=5, L=2,
-                 current_group=0, min_images_per_class=10):
+                 current_group=0, min_images_per_class=10, day=False, night=False):
         """
         Parameters (please check our paper for a clearer explanation of the parameters).
         ----------
@@ -47,7 +46,7 @@ class TrainDataset(torch.utils.data.Dataset):
         if not os.path.exists(filename):
             os.makedirs("cache", exist_ok=True)
             logging.info(f"Cached dataset {filename} does not exist, I'll create it now.")
-            self.initialize(dataset_folder, M, N, alpha, L, min_images_per_class, filename)
+            self.initialize(dataset_folder, M, N, alpha, L, min_images_per_class, filename, day, night)
         elif current_group == 0:
             logging.info(f"Using cached dataset {filename}")
         
@@ -86,7 +85,7 @@ class TrainDataset(torch.utils.data.Dataset):
         tensor_image = T.functional.to_tensor(pil_image)
         # assert tensor_image.shape == torch.Size([3, 512, 512]), \
         #    f"Image {image_path} should have shape [3, 512, 512] but has {tensor_image.shape}."
-        
+
         if self.augmentation_device == "cpu":
             tensor_image = self.transform(tensor_image)
         
@@ -101,23 +100,34 @@ class TrainDataset(torch.utils.data.Dataset):
         return len(self.classes_ids)
     
     @staticmethod
-    def initialize(dataset_folder, M, N, alpha, L, min_images_per_class, filename):
+    def initialize(dataset_folder, M, N, alpha, L, min_images_per_class, filename, day, night):
         logging.debug(f"Searching training images in {dataset_folder}")
         
         if not os.path.exists(dataset_folder):
             raise FileNotFoundError(f"Folder {dataset_folder} does not exist")
-        
-        images_paths = sorted(glob(f"{dataset_folder}/**/*.jpg", recursive=True))
+
+        # we select the images if whether it comes from night dataset or not
+        if not night:
+            images_paths = sorted(glob(f"{dataset_folder}/**/*.jpg", recursive=True))
+        else:  # no subfolders considered
+            images_paths = sorted(glob(f"{dataset_folder}/*jpg", recursive=True))
         logging.debug(f"Found {len(images_paths)} images")
-        
+
         logging.debug("For each image, get its UTM east, UTM north and heading from its path")
-        images_metadatas = [p.split("@") for p in images_paths]
-        # field 1 is UTM east, field 2 is UTM north, field 9 is heading
-        utmeast_utmnorth_heading = [(m[1], m[2], m[9]) for m in images_metadatas]
-        utmeast_utmnorth_heading = np.array(utmeast_utmnorth_heading).astype(np.float)
-        
+
+        if not night:
+            images_metadatas = [p.split("@") for p in images_paths]
+            # field 1 is UTM east, field 2 is UTM north, field 9 is heading
+            utmeast_utmnorth_heading = [(m[1], m[2], m[9]) for m in images_metadatas]
+            utmeast_utmnorth_heading = np.array(utmeast_utmnorth_heading).astype(float)
+        else:
+            images_metadatas = [p.split("@") for p in images_paths]
+            # field 1 is UTM east, field 2 is UTM north, field 9 is heading
+            utmeast_utmnorth_heading = [(m[1], m[2], m[9]) for m in images_metadatas]
+            utmeast_utmnorth_heading = np.array(utmeast_utmnorth_heading).astype(float)  # updated for new python
+
         logging.debug("For each image, get class and group to which it belongs")
-        class_id__group_id = [TrainDataset.get__class_id__group_id(*m, M, alpha, N, L)
+        class_id__group_id = [TrainDataset.get__class_id__group_id(*m, M, alpha, N, L, day, night)
                               for m in utmeast_utmnorth_heading]
         
         logging.debug("Group together images belonging to the same class")
@@ -145,7 +155,7 @@ class TrainDataset(torch.utils.data.Dataset):
         torch.save((classes_per_group, images_per_class), filename)
     
     @staticmethod
-    def get__class_id__group_id(utm_east, utm_north, heading, M, alpha, N, L):
+    def get__class_id__group_id(utm_east, utm_north, heading, M, alpha, N, L, day, night):
         """Return class_id and group_id for a given point.
             The class_id is a triplet (tuple) of UTM_east, UTM_north and
             heading (e.g. (396520, 4983800,120)).
@@ -155,8 +165,17 @@ class TrainDataset(torch.utils.data.Dataset):
         rounded_utm_east = int(utm_east // M * M)  # Rounded to nearest lower multiple of M
         rounded_utm_north = int(utm_north // M * M)
         rounded_heading = int(heading // alpha * alpha)
-        
-        class_id = (rounded_utm_east, rounded_utm_north, rounded_heading)
+        # check whether it's not a day nor not a night
+        if not day and not night:
+            # the class label for UTM prediction
+            class_id = (rounded_utm_east, rounded_utm_north, rounded_heading)
+        elif not day and night:
+            # class label for night domain
+            class_id = (0, 0, 0)
+        else:
+            # class label for day domain
+            class_id = (1, 1, 1)
+
         # group_id goes from (0, 0, 0) to (N, N, L)
         group_id = (rounded_utm_east % (M * N) // M,
                     rounded_utm_north % (M * N) // M,

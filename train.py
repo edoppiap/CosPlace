@@ -1,4 +1,4 @@
-
+import os
 import sys
 import torch
 import logging
@@ -30,7 +30,14 @@ logging.info(f"Arguments: {args}")
 logging.info(f"The outputs are being saved in {args.output_folder}")
 
 #### Model
-model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim)
+if args.domain_adapt == 'True':
+    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim,
+                                                alpha=0.05, domain_adapt="True")
+    logging.info(f"Using domain adaption")
+else:
+    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
+    logging.info(f"Using domain adaption")
+
 
 logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
 
@@ -69,7 +76,7 @@ elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
     print("Invalid scheduler choice")
-    
+
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
                        current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]
@@ -89,13 +96,46 @@ test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
 logging.info(f"Validation set: {val_ds}")
 logging.info(f"Test set: {test_ds}")
 
+# Dataset day label (1,1,1)
+groups_day = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
+                       current_group=n, min_images_per_class=args.min_images_per_class, day = True) for n in range(args.groups_num)]
+# Each group has its own classifier, which depends on the number of classes in the group
+classifiers_day = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups_day]
+classifiers_optimizers_day = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers_day]
+
+#How many classes and images for the day domain label prediction
+logging.info(f"Using {len(groups_day)} groups")
+logging.info(f"The {len(groups_day)} groups have respectively the following number of classes {[len(g) for g in groups_day]}")
+logging.info(f"The {len(groups_day)} groups have respectively the following number of images {[g.get_images_num() for g in groups_day]}")
+
+logging.info(f"Day sunny trial group: {groups_day[0]} ")
+
+#Dataset night label (0,0,0)
+# path kaggle:  "/kaggle/working/data/tokyo_xs/night"
+# path to pc:
+groups_night = [TrainDataset(args, "/kaggle/working/data/tokyo_xs/night",
+                             M=args.M, alpha=args.alpha, N=args.N, L=args.L, current_group=n,
+                             min_images_per_class=args.min_images_per_class, night=True) \
+                for n in range(args.groups_num)]
+# Each group has its own classifier, which depends on the number of classes in the group1
+classifiers_night = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups_night]
+classifiers_optimizers_night = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers_night]
+
+#How many classes and images for the night domain label prediction
+logging.info(f"Using {len(groups_night)} groups")
+logging.info(f"The {len(groups_night)} groups have respectively the following number of classes {[len(g) for g in groups_night]}")
+logging.info(f"The {len(groups_night)} groups have respectively the following number of images {[g.get_images_num() for g in groups_night]}")
+
+logging.info(f"Day night version trial group: {groups_night[0]} ")
+
 #### Resume
 if args.resume_train:
     model, model_optimizer, classifiers, classifiers_optimizers, best_val_recall1, start_epoch_num = \
         util.resume_train(args, args.output_folder, model, model_optimizer, classifiers, classifiers_optimizers)
     model = model.to(args.device)
     epoch_num = start_epoch_num - 1
-    logging.info(f"Resuming from epoch {start_epoch_num} with best R@1 {best_val_recall1:.1f} from checkpoint {args.resume_train}")
+    logging.info(
+        f"Resuming from epoch {start_epoch_num} with best R@1 {best_val_recall1:.1f} from checkpoint {args.resume_train}")
 else:
     best_val_recall1 = start_epoch_num = 0
 
@@ -129,75 +169,158 @@ if args.augmentation_device == "cuda":
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
 
-for epoch_num in range(start_epoch_num, args.epochs_num):
-    
-    #### Train
-    epoch_start_time = datetime.now()
-    # Select classifier and dataloader according to epoch
-    current_group_num = epoch_num % args.groups_num
-    classifiers[current_group_num] = classifiers[current_group_num].to(args.device)
-    util.move_to_device(classifiers_optimizers[current_group_num], args.device)
-    
-    dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
-                                            batch_size=args.batch_size, shuffle=True,
-                                            pin_memory=(args.device == "cuda"), drop_last=True)
-    
-    dataloader_iterator = iter(dataloader)
-    model = model.train()
-    
-    epoch_losses = np.zeros((0, 1), dtype=np.float32)
-    for iteration in tqdm(range(args.iterations_per_epoch), ncols=100):
-        images, targets, _ = next(dataloader_iterator)
-        images, targets = images.to(args.device), targets.to(args.device)
-        
-        if args.augmentation_device == "cuda":
-            images = gpu_augmentation(images)
-        
-        model_optimizer.zero_grad()
-        classifiers_optimizers[current_group_num].zero_grad()
-        
-        if not args.use_amp16:
-            descriptors = model(images)
-            output = classifiers[current_group_num](descriptors, targets)
-            loss = criterion(output, targets)
-            loss.backward()
-            epoch_losses = np.append(epoch_losses, loss.item())
-            del loss, output, images
-            model_optimizer.step()
-            classifiers_optimizers[current_group_num].step()
-        else:  # Use AMP 16
-            with torch.cuda.amp.autocast():
+# If domain adaption is set to True we train
+if args.domain_adapt == 'True':
+    # from torch.utils.data import DataLoader
+    for epoch_num in range(start_epoch_num, args.epochs_num):
+
+        #### Train
+        epoch_start_time = datetime.now()
+        # Select classifier and dataloader according to epoch
+        current_group_num = epoch_num % args.groups_num
+
+        # class label clasifier
+        classifiers[current_group_num] = classifiers[current_group_num].to(args.device)
+        util.move_to_device(classifiers_optimizers[current_group_num], args.device)
+
+        # day domain classifier
+        classifiers_day[current_group_num] = classifiers_day[current_group_num].to(args.device)
+        util.move_to_device(classifiers_optimizers_day[current_group_num], args.device)
+
+        # night domain classifier
+        classifiers_night[current_group_num] = classifiers_night[current_group_num].to(args.device)
+        util.move_to_device(classifiers_optimizers_night[current_group_num], args.device)
+
+        # classic dataloader
+        dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
+                                                batch_size=args.batch_size, shuffle=True,
+                                                pin_memory=(args.device == "cuda"), drop_last=True)
+
+        dataloader_iterator = iter(dataloader)
+        model = model.train()
+
+        # day dataloader
+        dataloader_day = commons.InfiniteDataLoader(groups_day[current_group_num], num_workers=args.num_workers,
+                                                    batch_size=args.batch_size, shuffle=True,
+                                                    pin_memory=(args.device == "cuda"), drop_last=True)
+        dataloader_iterator_day = iter(dataloader_day)
+
+        # night dataloader
+        dataloader_night = commons.InfiniteDataLoader(groups_night[current_group_num], num_workers=args.num_workers,
+                                                      batch_size=args.batch_size, shuffle=True,
+                                                      pin_memory=(args.device == "cuda"), drop_last=True)
+
+        dataloader_iterator_night = iter(dataloader_night)
+
+        logging.info(f"Dataloader CLASSIC: {len(dataloader)}")
+        logging.info(f"Dataloader DAY: {len(dataloader_day)}")
+        logging.info(f"Dataloader NIGHT: {len(dataloader_night)}")
+
+        epoch_losses = np.zeros((0, 1), dtype=np.float32)
+        for iteration in tqdm(range(args.iterations_per_epoch), ncols=100):
+            # images, target UTM labels
+            images, targets, _ = next(dataloader_iterator)
+            images, targets = images.to(args.device), targets.to(args.device)
+
+            # images, target day domain labels
+            images_day, targets_day, _ = next(dataloader_iterator_day)
+            images_day, targets_day = images_day.to(args.device), targets_day.to(args.device)
+
+            # images,target night domain labels
+            images_night, targets_night, _ = next(dataloader_iterator_night)
+            images_night, targets_night = images_night.to(args.device), targets_night.to(args.device)
+
+            if args.augmentation_device == "cuda":
+                images = gpu_augmentation(images)
+                images_day = gpu_augmentation(images_day)
+                images_night = gpu_augmentation(images_night)
+
+            model_optimizer.zero_grad()
+            classifiers_optimizers[current_group_num].zero_grad()
+
+            if not args.use_amp16:
+
+                # loss classic
                 descriptors = model(images)
                 output = classifiers[current_group_num](descriptors, targets)
                 loss = criterion(output, targets)
-            scaler.scale(loss).backward()
-            epoch_losses = np.append(epoch_losses, loss.item())
-            del loss, output, images
-            scaler.step(model_optimizer)
-            scaler.step(classifiers_optimizers[current_group_num])
-            scaler.update()
-    
-    classifiers[current_group_num] = classifiers[current_group_num].cpu()
-    util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
-    
-    logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
-                  f"loss = {epoch_losses.mean():.4f}")
-    
-    #### Evaluation
-    recalls, recalls_str = test.test(args, val_ds, model)
-    logging.info(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, {val_ds}: {recalls_str[:20]}")
-    is_best = recalls[0] > best_val_recall1
-    best_val_recall1 = max(recalls[0], best_val_recall1)
-    # Save checkpoint, which contains all training parameters
-    util.save_checkpoint({
-        "epoch_num": epoch_num + 1,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": model_optimizer.state_dict(),
-        "classifiers_state_dict": [c.state_dict() for c in classifiers],
-        "optimizers_state_dict": [c.state_dict() for c in classifiers_optimizers],
-        "best_val_recall1": best_val_recall1
-    }, is_best, args.output_folder)
+                loss.backward()
 
+                # loss day
+                descriptors_day = model(images_day, alpha=0.05)
+                output_day = classifiers_day[current_group_num](descriptors_day, targets_day)
+                loss_day = criterion(output_day, targets_day)
+
+                # loss night
+                descriptors_night = model(images_night, alpha=0.05)
+                output_night = classifiers_night[current_group_num](descriptors_night, targets_night)
+                loss_night = criterion(output_night, targets_night)
+
+                # loss domain
+                loss_domain = loss_night + loss_day
+                loss_domain.backward()
+
+                epoch_losses = np.append(epoch_losses, loss.item())
+                epoch_losses = np.append(epoch_losses, loss_domain.item())
+
+                del loss, loss_night, loss_day, loss_domain, output, output_day, output_night, images, images_day, images_night
+                model_optimizer.step()
+                classifiers_optimizers[current_group_num].step()
+
+            else:  # Use AMP 16
+                with torch.cuda.amp.autocast():
+                    # loss classic
+                    descriptors = model(images)
+                    output = classifiers[current_group_num](descriptors, targets)
+                    loss = criterion(output, targets)
+
+                    # loss day
+                    descriptors_day = model(images_day)
+                    output_day = classifiers_day[current_group_num](descriptors_day, targets_day)
+                    loss_day = criterion(output_day, targets_day)
+
+                    # loss night
+                    descriptors_night = model(images_night)
+                    output_night = classifiers_night[current_group_num](descriptors_night, targets_night)
+                    loss_night = criterion(output_night, targets_night)
+
+                    # loss domain
+                    loss_domain = loss_night + loss_day
+
+                scaler.scale(loss).backward()
+                scaler.scale(loss_domain).backward()
+
+                epoch_losses = np.append(epoch_losses, loss.item())
+                epoch_losses = np.append(epoch_losses, loss_domain.item())
+
+                del loss, loss_night, loss_day, loss_domain, output, output_day, output_night, images, images_day, images_night
+                scaler.step(model_optimizer)
+                scaler.step(classifiers_optimizers[current_group_num])
+                scaler.update()
+
+        classifiers[current_group_num] = classifiers[current_group_num].cpu()
+        util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
+
+        logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
+                      f"loss = {epoch_losses.mean():.4f}")
+
+        #### Evaluation
+        recalls, recalls_str = test.test(args, val_ds, model)
+        logging.info(
+            f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, {val_ds}: {recalls_str[:20]}")
+        is_best = recalls[0] > best_val_recall1
+        best_val_recall1 = max(recalls[0], best_val_recall1)
+        # Save checkpoint, which contains all training parameters
+        util.save_checkpoint({
+            "epoch_num": epoch_num + 1,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": model_optimizer.state_dict(),
+            "classifiers_state_dict": [c.state_dict() for c in classifiers],
+            "optimizers_state_dict": [c.state_dict() for c in classifiers_optimizers],
+            "best_val_recall1": best_val_recall1
+        }, is_best, args.output_folder)
+else:
+    pass
 
 logging.info(f"Trained for {epoch_num+1:02d} epochs, in total in {str(datetime.now() - start_time)[:-7]}")
 
