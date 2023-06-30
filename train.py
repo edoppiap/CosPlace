@@ -192,9 +192,9 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             del loss, output, images
             scaler.step(model_optimizer)
             scaler.step(classifiers_optimizers[current_group_num])
+            scaler.update()
             if not scheduler == None:
                 scheduler.step()
-            scaler.update()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
