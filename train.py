@@ -194,7 +194,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             scaler.step(classifiers_optimizers[current_group_num])
             scale = scaler.get_scale()
             scaler.update()
-            skip_scheduler = scale > scaler.getScale()
+            skip_scheduler = scale > scaler.get_scale()
             if scheduler is not None and not skip_scheduler:
                 scheduler.step()
     
