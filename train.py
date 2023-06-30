@@ -180,6 +180,8 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             del loss, output, images
             model_optimizer.step()
             classifiers_optimizers[current_group_num].step()
+            if scheduler is not None:
+                scheduler.step()
         else:  # Use AMP 16
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
@@ -190,20 +192,25 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             del loss, output, images
             scaler.step(model_optimizer)
             scaler.step(classifiers_optimizers[current_group_num])
+            scale = scaler.get_scale()
             scaler.update()
+            skip_scheduler = scale > scaler.get_scale()
+            if scheduler is not None and not skip_scheduler:
+                scheduler.step()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
     
     logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
                   f"loss = {epoch_losses.mean():.4f}")
+    if not scheduler == None:
+        logging.debug(f"Scheduler step = {scheduler.get_last_lr()}")
     
     #### Evaluation
     recalls, recalls_str = test.test(args, val_ds, model)
     logging.info(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, {val_ds}: {recalls_str[:20]}")
     is_best = recalls[0] > best_val_recall1
     best_val_recall1 = max(recalls[0], best_val_recall1)
-    scheduler.step(recalls[0])
     # Save checkpoint, which contains all training parameters
     util.save_checkpoint({
         "epoch_num": epoch_num + 1,
