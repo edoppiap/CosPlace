@@ -180,8 +180,6 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             del loss, output, images
             model_optimizer.step()
             classifiers_optimizers[current_group_num].step()
-            if scheduler is not None:
-                scheduler.step()
         else:  # Use AMP 16
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
@@ -195,14 +193,14 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             scale = scaler.get_scale()
             scaler.update()
             skip_scheduler = scale > scaler.get_scale()
-            if scheduler is not None and not skip_scheduler:
-                scheduler.step()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
     
     logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
                   f"loss = {epoch_losses.mean():.4f}")
+    if scheduler is not None:
+        scheduler.step(epoch_losses.mean())
     if not scheduler == None:
         logging.debug(f"Scheduler step = {scheduler.get_last_lr()}")
     
