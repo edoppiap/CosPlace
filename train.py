@@ -181,7 +181,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             model_optimizer.step()
             classifiers_optimizers[current_group_num].step()
             if scheduler is not None:
-                scheduler.step()
+                scheduler.step(loss)
         else:  # Use AMP 16
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
@@ -196,7 +196,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             scaler.update()
             skip_scheduler = scale > scaler.get_scale()
             if scheduler is not None and not skip_scheduler:
-                scheduler.step(loss)
+                scheduler.step()
     
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
