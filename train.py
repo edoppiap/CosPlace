@@ -178,7 +178,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         if args.augmentation_device == "cuda":
             images = gpu_augmentation(images)
             if args.loss == 'TripletMarginLoss':
-                augmented = gpu_augmentation2(images)
+                augmented = gpu_augmentation_2(images)
                 
         
         model_optimizer.zero_grad()
