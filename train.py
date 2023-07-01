@@ -190,8 +190,9 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             if args.loss == 'TripletMarginLoss':
                 augmented_descriptors = model(augmented)
                 augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
-                ref_emb = torch.cat([augmented_descriptors, augmented_output], dim=0)
-                loss = criterion(output, ref_emb)
+                ref_emb0 = torch.cat([augmented_descriptors], dim=0)
+                ref_emb1 = torch.cat([augmented_output], dim=0)
+                loss = criterion(output, ref_emb0, ref_emb1)
             elif args.loss == 'VICRegLoss':
                 loss = criterion(output)
             else:
