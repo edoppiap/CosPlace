@@ -46,6 +46,8 @@ model = model.to(args.device).train()
 ### Loss 
 if args.loss == 'CrossEntropyLoss':
     criterion = torch.nn.CrossEntropyLoss()
+elif args.loss == 'TripletMarginLoss':
+    criterion = losses.SelfSupervisedLoss(losses.TripletMarginLoss())
 elif args.loss == 'VICRegLoss':
     criterion = losses.VICRegLoss(invariance_lambda=25, 
                                 variance_mu=25, 
@@ -163,16 +165,22 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         images, targets = images.to(args.device), targets.to(args.device)
         
         if args.augmentation_device == "cuda":
-            images = gpu_augmentation(images)
+            if args.loss == 'TripletMarginLoss':
+                augmentation = gpu_augmentation(images)
+            else:
+                images = gpu_augmentation(images)
         
         model_optimizer.zero_grad()
         classifiers_optimizers[current_group_num].zero_grad()
         
         if not args.use_amp16:
             descriptors = model(images)
+            augmented = model(augmentation)
             output = classifiers[current_group_num](descriptors, targets)
             if args.loss == 'VICRegLoss':
                 loss = criterion(output)
+            elif args.loss == 'TripletMarginLoss':
+                loss = criterion(output, augmented)
             else:
                 loss = criterion(output, targets)
             loss.backward()
