@@ -82,7 +82,7 @@ class GeoLocalizationNet(nn.Module):
         except Exception as e:
             logging.info(f"Errore durante la gestione dell'adattamento del dominio in " + str(e))
 
-    def forward(self, x):
+    def forward(self, x, alpha=None):
         x = self.backbone(x)
         if self.domain_adapt is not None and self.alpha is not None:  # applichiamo l'adattamento del dominio
             # Dominio, applichiamo l'inversione del gradiente
