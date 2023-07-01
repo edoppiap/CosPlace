@@ -144,11 +144,11 @@ if args.augmentation_device == "cuda":
     
     gpu_augmentation = T.Compose(compose)
     if args.loss == "TripletMarginLoss":
-        compose = []
-        compose.append(T.RandomErasing(0.5))
-        compose.append(T.RandomPerspective(0.5))
-        compose.append(T.RandomCrop(0.5))
-        gpu_augmentation_2 = T.Compose(compose)
+        compose2 = []
+        compose2.append(T.RandomErasing(0.5))
+        compose2.append(T.RandomPerspective(0.5))
+        compose2.append(T.RandomCrop(0.5))
+        gpu_augmentation_2 = T.Compose(compose2)
     
 
 if args.use_amp16:
@@ -178,7 +178,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         if args.augmentation_device == "cuda":
             images = gpu_augmentation(images)
             if args.loss == 'TripletMarginLoss':
-                augmented = gpu_augmentation(images)
+                augmented = gpu_augmentation2(images)
                 
         
         model_optimizer.zero_grad()
