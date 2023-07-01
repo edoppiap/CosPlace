@@ -143,6 +143,13 @@ if args.augmentation_device == "cuda":
     compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
     
     gpu_augmentation = T.Compose(compose)
+    if args.loss == "TripletMarginLoss":
+        compose = []
+        compose.append(T.RandomErasing(0.5))
+        compose.append(T.RandomPerspective(0.5))
+        compose.append(T.RandomCrop(0.5))
+        gpu_augmentation_2 = T.Compose(compose)
+    
 
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
@@ -169,10 +176,10 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         images, targets = images.to(args.device), targets.to(args.device)
         
         if args.augmentation_device == "cuda":
+            images = gpu_augmentation(images)
             if args.loss == 'TripletMarginLoss':
                 augmented = gpu_augmentation(images)
-            else:
-                images = gpu_augmentation(images)
+                
         
         model_optimizer.zero_grad()
         classifiers_optimizers[current_group_num].zero_grad()
