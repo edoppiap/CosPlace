@@ -46,14 +46,9 @@ model = model.to(args.device).train()
 ### Loss 
 if args.loss == 'CrossEntropyLoss':
     criterion = torch.nn.CrossEntropyLoss()
-elif args.loss == 'L1loss':
-    criterion = torch.nn.L1Loss()
-elif args.loss == 'MSELoss':
-    criterion = torch.nn.MSELoss()
-elif args.loss == 'TripletLoss':
-    criterion = losses.TripletMarginLoss(margin=.2)
-elif args.loss == 'ContrastiveLoss':
-    criterion = losses.ContrastiveLoss()
+elif args.loss == 'VICRegLoss':
+    criterion = losses.VICRegLoss()
+    
     
 #### Optimizer
 # 

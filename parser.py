@@ -29,7 +29,7 @@ def parse_arguments(is_training: bool = True):
     
     #Loss
     parser.add_argument('--loss', type=str, default='CrossEntropyLoss', 
-                        choices=["CrossEntropyLoss", "L1loss", "MSELoss","ContrastiveLoss", "TripletLoss"], 
+                        choices=["CrossEntropyLoss", "VICRegLoss"], 
                         help='loss to use')
 
     # Training parameters
