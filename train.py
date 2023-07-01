@@ -178,17 +178,14 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         classifiers_optimizers[current_group_num].zero_grad()
         
         if not args.use_amp16:
+            descriptors = model(images)
+            output = classifiers[current_group_num](descriptors, targets)
             if args.loss == 'TripletMarginLoss':
-                output, embeddings = model(images)
-                augmented_output, augmented_embeddings = model(augmented)
-                ref_emb = torch.cat([embeddings, augmented_embeddings], dim=0)
-            else:
-                descriptors = model(images)
-                output = classifiers[current_group_num](descriptors, targets)
-            if args.loss == 'VICRegLoss':
+                augmented_descriptors = model(augmented)
+                ref_emb = torch.cat([descriptors, augmented_descriptors], dim=0)
+                loss = criterion(descriptors, ref_emb)
+            elif args.loss == 'VICRegLoss':
                 loss = criterion(output)
-            elif args.loss == 'TripletMarginLoss':
-                loss = criterion(embeddings, ref_emb)
             else:
                 loss = criterion(output, targets)
             loss.backward()
