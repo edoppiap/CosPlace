@@ -135,6 +135,10 @@ if args.augmentation_device == "cuda":
                                                           scale=[1-args.random_resized_crop, 1]))
     compose.append(augmentations.DeviceAgnosticRandomHorizontalFlip(args.horizontal_flip_prob))
     compose.append(T.RandomVerticalFlip(args.vertical_flip_prob))
+    if args.loss if args.loss == "TripletMarginLoss":
+        compose.append(T.RandomErasing(0.5))
+        compose.append(T.RandomPerspective(0.5))
+        compose.append(T.RandomCrop(0.5))
     if args.autoaugment_policy:
         for policy_name in args.autoaugment_policy: # it can be more than one
             logging.info(f"Selected AutoAugment policy: {policy_name}")
@@ -143,12 +147,6 @@ if args.augmentation_device == "cuda":
     compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
     
     gpu_augmentation = T.Compose(compose)
-    if args.loss == "TripletMarginLoss":
-        compose2 = []
-        compose2.append(T.RandomErasing(0.5))
-        compose2.append(T.RandomPerspective(0.5))
-        compose2.append(T.RandomCrop(0.5))
-        gpu_augmentation_2 = T.Compose(compose2)
     
 
 if args.use_amp16:
@@ -176,9 +174,10 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         images, targets = images.to(args.device), targets.to(args.device)
         
         if args.augmentation_device == "cuda":
-            images = gpu_augmentation(images)
             if args.loss == 'TripletMarginLoss':
-                augmented = gpu_augmentation_2(images)
+                augmented = gpu_augmentation(images)
+            else:
+                images = gpu_augmentation(images)
                 
         
         model_optimizer.zero_grad()
