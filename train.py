@@ -43,6 +43,18 @@ if args.resume_model is not None:
 
 model = model.to(args.device).train()
 
+### Loss 
+if args.loss == 'CrossEntropyLoss':
+    criterion = torch.nn.CrossEntropyLoss()
+elif args.loss == 'L1loss':
+    criterion = torch.nn.L1Loss()
+elif args.loss == 'MSELoss':
+    criterion = torch.nn.MSELoss()
+elif args.loss == 'TripletLoss':
+    criterion = losses.TripletMarginLoss(margin=.2)
+elif args.loss == 'ContrastiveLoss':
+    criterion = losses.ContrastiveLoss()
+    
 #### Optimizer
 # 
 #UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
@@ -71,19 +83,6 @@ elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
     scheduler = None
-
-### Loss 
-if args.loss == 'CrossEntropyLoss':
-    criterion = torch.nn.CrossEntropyLoss()
-elif args.loss == 'L1loss':
-    criterion = torch.nn.L1Loss()
-elif args.loss == 'MSELoss':
-    criterion = torch.nn.MSELoss()
-elif args.loss == 'TripletLoss':
-    criterion = losses.TripletMarginLoss()
-elif args.loss == 'ContrastiveLoss':
-    criterion = losses.ContrastiveLoss()
-
     
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
