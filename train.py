@@ -135,7 +135,7 @@ if args.augmentation_device == "cuda":
                                                           scale=[1-args.random_resized_crop, 1]))
     compose.append(augmentations.DeviceAgnosticRandomHorizontalFlip(args.horizontal_flip_prob))
     compose.append(T.RandomVerticalFlip(args.vertical_flip_prob))
-    if args.loss if args.loss == "TripletMarginLoss":
+    if args.loss == "TripletMarginLoss":
         compose.append(T.RandomErasing(0.5))
         compose.append(T.RandomPerspective(0.5))
         compose.append(T.RandomCrop(0.5))
