@@ -138,7 +138,7 @@ if args.augmentation_device == "cuda":
     if args.loss == "TripletMarginLoss":
         compose.append(T.RandomErasing(0.5))
         compose.append(T.RandomPerspective(0.5))
-        compose.append(T.RandomCrop(0.5))
+        #compose.append(T.RandomCrop(0.5))
     if args.autoaugment_policy:
         for policy_name in args.autoaugment_policy: # it can be more than one
             logging.info(f"Selected AutoAugment policy: {policy_name}")
