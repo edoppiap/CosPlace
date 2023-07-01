@@ -17,10 +17,13 @@ def parse_arguments(is_training: bool = True):
                         choices=["VGG16", "ResNet18", "ResNet50", "ResNet101", "ResNet152", "vit_b_16", "vit_b_32", "vit_l_16", "vit_l_32", "vit_h_14", "maxvit_t"], help="_")
     parser.add_argument("--fc_output_dim", type=int, default=512,
                         help="Output dimension of final fully connected layer")
+    # Optimizer
+    parser.add_argument("--optimizer", type=str, default='AdamW',
+                        choices=["AdamW","Adam","SGD","Adagrad","LBFGS","Adadelta"],
+                        help="Optimizer to use")
     # Domain adaptation parameters & Data augmentation
     parser.add_argument("--domain_adapt", type=str, default=None,
                         help="It turns on Domain Adaptation training")
-
     # Scheduler
     parser.add_argument('--scheduler', type=str, default='none', 
                         choices=["StepLR","ReduceLROnPlateau","CosineAnnealignLR","ExponentialLR"],
