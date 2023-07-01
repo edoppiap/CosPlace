@@ -7,7 +7,7 @@ from tqdm import tqdm
 import multiprocessing
 from datetime import datetime
 import torchvision.transforms as T
-from pytorch_metric_learning import losses
+from pytorch_metric_learning import distances, losses, miners, reducers, testers
 
 
 import test
@@ -33,6 +33,11 @@ logging.info(f"The outputs are being saved in {args.output_folder}")
 
 #### Model
 model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim)
+
+### convenient function from pytorch-metric-learning ###
+def get_all_embeddings(dataset, model):
+    tester = testers.BaseTester()
+    return tester.get_all_embeddings(dataset, model)
 
 logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
 
@@ -78,7 +83,6 @@ elif args.scheduler == 'ReduceLROnPlateau':
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min') 
 elif args.scheduler == 'CosineAnnealignLR':
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
-# Add more elif conditions for other schedulers you want to use
 elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
@@ -166,7 +170,9 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         
         if args.augmentation_device == "cuda":
             if args.loss == 'TripletMarginLoss':
-                augmentation = gpu_augmentation(images)
+                embeddings = model.backbone(images)
+                augmented = gpu_augmentation(images)
+                ref_emb = model.backbone(augmented)
             else:
                 images = gpu_augmentation(images)
         
@@ -179,8 +185,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             if args.loss == 'VICRegLoss':
                 loss = criterion(output)
             elif args.loss == 'TripletMarginLoss':
-                augmented = model(augmentation)
-                loss = criterion(output, augmented)
+                loss = criterion(embeddings, ref_emb)
             else:
                 loss = criterion(output, targets)
             loss.backward()
