@@ -175,11 +175,11 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         
         if not args.use_amp16:
             descriptors = model(images)
-            augmented = model(augmentation)
             output = classifiers[current_group_num](descriptors, targets)
             if args.loss == 'VICRegLoss':
                 loss = criterion(output)
             elif args.loss == 'TripletMarginLoss':
+                augmented = model(augmentation)
                 loss = criterion(output, augmented)
             else:
                 loss = criterion(output, targets)
