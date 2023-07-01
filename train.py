@@ -47,7 +47,10 @@ model = model.to(args.device).train()
 if args.loss == 'CrossEntropyLoss':
     criterion = torch.nn.CrossEntropyLoss()
 elif args.loss == 'VICRegLoss':
-    criterion = losses.VICRegLoss()
+    criterion = losses.VICRegLoss(invariance_lambda=25, 
+                                variance_mu=25, 
+                                covariance_v=1, 
+                                eps=1e-4)
     
     
 #### Optimizer
