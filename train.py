@@ -40,11 +40,10 @@ def generate_triplets(batch_output, batch_labels):
         positive_idx = torch.nonzero(batch_labels == anchor_label).squeeze()
         negative_idx = torch.nonzero(batch_labels != anchor_label).squeeze()
 
-        if len(positive_idx) > 0 and len(negative_idx) > 0:
-            positive = batch_output[positive_idx]
-            negative = batch_output[negative_idx]
+        positive = batch_output[positive_idx]
+        negative = batch_output[negative_idx]
 
-            triplets.append((anchor, positive, negative))
+        triplets.append((anchor, positive, negative))
 
     return triplets
 
