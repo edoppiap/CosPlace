@@ -31,6 +31,23 @@ logging.info(" ".join(sys.argv))
 logging.info(f"Arguments: {args}")
 logging.info(f"The outputs are being saved in {args.output_folder}")
 
+def generate_triplets(batch_output, batch_labels):
+    triplets = []
+    for i in range(len(batch_output)):
+        anchor = batch_output[i]
+        anchor_label = batch_labels[i]
+
+        positive_idx = torch.nonzero(batch_labels == anchor_label).squeeze()
+        negative_idx = torch.nonzero(batch_labels != anchor_label).squeeze()
+
+        if len(positive_idx) > 0 and len(negative_idx) > 0:
+            positive = batch_output[positive_idx]
+            negative = batch_output[negative_idx]
+
+            triplets.append((anchor, positive, negative))
+
+    return triplets
+
 #### Model
 model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim)
 
@@ -46,10 +63,6 @@ model = model.to(args.device).train()
 ### Loss 
 if args.loss == 'CrossEntropyLoss':
     criterion = torch.nn.CrossEntropyLoss()
-elif args.loss == 'L1loss':
-    criterion = torch.nn.L1Loss()
-elif args.loss == 'MSELoss':
-    criterion = torch.nn.MSELoss()
 elif args.loss == 'TripletLoss':
     criterion = losses.TripletMarginLoss(margin=.2)
 elif args.loss == 'ContrastiveLoss':
@@ -173,7 +186,18 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         if not args.use_amp16:
             descriptors = model(images)
             output = classifiers[current_group_num](descriptors, targets)
-            loss = criterion(output, targets)
+            loss = None
+            if(isinstance(criterion, losses.TripletMarginLoss)):
+                triplets = generate_triplets(descriptors, targets)
+                if len(triplets) > 0:
+                    anchors, positives, negatives = zip(*triplets)
+                    anchors = torch.stack(anchors)
+                    positives = torch.stack(positives)
+                    negatives = torch.stack(negatives)
+                    
+                    loss = criterion(anchors, positives, negatives)
+            else:
+                loss = criterion(output, targets)
             loss.backward()
             epoch_losses = np.append(epoch_losses, loss.item())
             del loss, output, images
