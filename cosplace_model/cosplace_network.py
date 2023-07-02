@@ -47,6 +47,12 @@ CHANNELS_NUM_IN_LAST_CONV = {
     "vit_l_16": 1024,
     "vit_l_32": 1024,
     "vit_h_14": 1280,
+    "efficientnet_v2_s": 1280,
+    "efficientnet_b0": 1280,
+    "efficientnet_b1": 1280,
+    "efficientnet_b2": 1408,
+    "mobilenet_v3_small": 576,
+    "mobilenet_v3_large": 960,
 }
 
 
