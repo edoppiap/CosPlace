@@ -25,9 +25,15 @@ def parse_arguments(is_training: bool = True):
     parser.add_argument("--domain_adapt", type=str, default=None,
                         help="It turns on Domain Adaptation training")
     # Scheduler
-    parser.add_argument('--scheduler', type=str, default='none', 
+    parser.add_argument('--scheduler', type=str, default=None, 
                         choices=["StepLR","ReduceLROnPlateau","CosineAnnealignLR","ExponentialLR"],
                         help='scheduler to use')
+    
+    #Loss
+    parser.add_argument('--loss', type=str, default='CrossEntropyLoss', 
+                        choices=["CrossEntropyLoss", "VICRegLoss", "TripletMarginLoss"], 
+                        help='loss to use')
+
     # Training parameters
     parser.add_argument("--use_amp16", action="store_true",
                         help="use Automatic Mixed Precision")
