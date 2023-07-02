@@ -151,6 +151,140 @@ def test(args: Namespace, eval_ds: Dataset, model: torch.nn.Module) -> Tuple[np.
 
 # GeoWarp
 def use_geowarp(args: Namespace, eval_ds: Dataset, model: torch.nn.Module):
+    """Compute descriptors of the given dataset and compute the recalls."""
+
+    model = model.eval()
+    if args.multi_scale:
+        # avg by default
+        logging.info(f"Test with multi-scale, the multi-scale method is: {args.multi_scale_method}")
+    with torch.no_grad():
+        logging.debug("Extracting database descriptors for evaluation/testing")
+        database_subset_ds = Subset(eval_ds, list(range(eval_ds.database_num)))
+        database_dataloader = DataLoader(dataset=database_subset_ds, num_workers=args.num_workers,
+                                         batch_size=args.infer_batch_size, pin_memory=(args.device == "cuda"))
+        all_descriptors = np.empty((len(eval_ds), args.fc_output_dim), dtype="float32")
+
+        for images, indices in tqdm(database_dataloader, ncols=100):
+            if args.multi_scale and args.multi_scale_method == 'avg':
+                H = args.resize[0]
+                W = args.resize[1]
+                HxW = args.resize
+                original = images
+                # create the resolution lists
+                H_list = [int(H / i) for i in args.select_resolutions]
+                W_list = [int(W / i) for i in args.select_resolutions]
+                multi_scale = []
+                for i, j in zip(H_list, W_list):
+                    size = (i, j)  # size resolution of the resize
+                    tra = torch.nn.Sequential(transforms.Resize(size))  # creating the transformation
+                    tra2 = torch.nn.Sequential(transforms.Resize(HxW))
+                    tmp_query = tra(original).to(args.device)  # transforming the img
+                    img = tra2(tmp_query)
+                    descriptors = model("features_extractor", [img, "global"])
+                    multi_scale.append(descriptors)
+                feature = torch.stack(multi_scale, -1)
+                descriptors = torch.mean(feature.type(torch.float32), dim=-1)
+            elif args.multi_scale and args.multi_scale_method == 'sum':
+                H = args.resize[0]
+                W = args.resize[1]
+                HxW = args.resize
+                original = images
+                # create the resolution lists
+                H_list = [int(H / i) for i in args.select_resolutions]
+                W_list = [int(W / i) for i in args.select_resolutions]
+                multi_scale = []
+                for i, j in zip(H_list, W_list):
+                    size = (i, j)  # size resolution of the resize
+                    tra = torch.nn.Sequential(transforms.Resize(size))  # creating the transformation
+                    tra2 = torch.nn.Sequential(transforms.Resize(HxW))
+                    tmp_query = tra(original).to(args.device)  # transforming the img
+                    img = tra2(tmp_query)
+                    descriptors = model("features_extractor", [img, "global"])
+                    multi_scale.append(descriptors)
+                feature = torch.stack(multi_scale, -1)
+                descriptors = torch.sum(feature.type(torch.float32), dim=-1)
+            elif args.multi_scale and args.multi_scale_method == 'max':
+                H = args.resize[0]
+                W = args.resize[1]
+                HxW = args.resize
+                original = images
+                # create the resolution lists
+                H_list = [int(H / i) for i in args.select_resolutions]
+                W_list = [int(W / i) for i in args.select_resolutions]
+                multi_scale = []
+                for i, j in zip(H_list, W_list):
+                    size = (i, j)  # size resolution of the resize
+                    tra = torch.nn.Sequential(transforms.Resize(size))  # creating the transformation
+                    tra2 = torch.nn.Sequential(transforms.Resize(HxW))
+                    tmp_query = tra(original).to(args.device)  # transforming the img
+                    img = tra2(tmp_query)
+                    descriptors = model("features_extractor", [img, "global"])
+                    multi_scale.append(descriptors)
+                feature = torch.stack(multi_scale, -1)
+                descriptors, max_index = torch.max(feature.type(torch.float32), dim=-1)
+                del max_index
+            elif args.multi_scale and args.multi_scale_method == 'min':
+                H = args.resize[0]
+                W = args.resize[1]
+                HxW = args.resize
+                original = images
+                # create the resolution lists
+                H_list = [int(H / i) for i in args.select_resolutions]
+                W_list = [int(W / i) for i in args.select_resolutions]
+                multi_scale = []
+                for i, j in zip(H_list, W_list):
+                    size = (i, j)  # size resolution of the resize
+                    tra = torch.nn.Sequential(transforms.Resize(size))  # creating the transformation
+                    tra2 = torch.nn.Sequential(transforms.Resize(HxW))
+                    tmp_query = tra(original).to(args.device)  # transforming the img
+                    img = tra2(tmp_query)
+                    descriptors = model("features_extractor", [img, "global"])
+                    multi_scale.append(descriptors)
+                feature = torch.stack(multi_scale, -1)
+                descriptors, min_index = torch.min(feature.type(torch.float32), dim=-1)
+                del min_index
+            else:
+                images.to(args.device)
+                descriptors = model("features_extractor", [images, "global"])
+
+            descriptors = descriptors.cpu().numpy()
+            all_descriptors[indices.numpy(), :] = descriptors
+
+        logging.debug("Extracting queries descriptors for evaluation/testing using batch size 1")
+        queries_infer_batch_size = 1
+        queries_subset_ds = Subset(eval_ds,
+                                   list(range(eval_ds.database_num, eval_ds.database_num + eval_ds.queries_num)))
+        queries_dataloader = DataLoader(dataset=queries_subset_ds, num_workers=args.num_workers,
+                                        batch_size=queries_infer_batch_size, pin_memory=(args.device == "cuda"))
+        for images, indices in tqdm(queries_dataloader, ncols=100):
+            images.to(args.device)
+            descriptors = model("features_extractor", [images, "global"])
+            descriptors = descriptors.cpu().numpy()
+            all_descriptors[indices.numpy(), :] = descriptors
+
+    queries_descriptors = all_descriptors[eval_ds.database_num:]
+    database_descriptors = all_descriptors[:eval_ds.database_num]
+
+    # Use a kNN to find predictions     ----    faiss (Facebook AI Similarity Search)
+
+    faiss_index = faiss.IndexFlatL2(args.fc_output_dim)
+    faiss_index.add(database_descriptors)
+    del database_descriptors, all_descriptors
+
+    logging.debug("Calculating recalls")
+    _, predictions = faiss_index.search(queries_descriptors, max(RECALL_VALUES))
+
+    #### For each query, check if the predictions are correct
+    positives_per_query = eval_ds.get_positives()
+    recalls = np.zeros(len(RECALL_VALUES))
+    for query_index, preds in enumerate(predictions):
+        for i, n in enumerate(RECALL_VALUES):
+            if np.any(np.in1d(preds[:n], positives_per_query[query_index])):
+                recalls[i:] += 1
+                break
+                # Divide by queries_num and multiply by 100, so the recalls are in percentages
+    recalls = recalls / eval_ds.queries_num * 100
+    recalls_str = ", ".join([f"R@{val}: {rec:.1f}" for val, rec in zip(RECALL_VALUES, recalls)])
     return recalls, recalls_str, predictions
 
 
