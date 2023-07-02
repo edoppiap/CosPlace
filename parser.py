@@ -62,6 +62,23 @@ def parse_arguments(is_training: bool = True):
                         help="path to checkpoint to resume, e.g. logs/.../last_checkpoint.pth")
     parser.add_argument("--resume_model", type=str, default=None,
                         help="path to model to resume, e.g. logs/.../best_model.pth")
+    # GeoWarp parameters
+    parser.add_argument("--k", type=int, default=0.6,
+                        help="parameter k, defining the difficulty of ss training data")
+    parser.add_argument("--ss_w", type=float, default=1,
+                        help="weight of self-supervised loss")
+    parser.add_argument("--consistency_w", type=float, default=0.1,
+                        help="weight of consistency loss")
+    parser.add_argument("--features_wise_w", type=float, default=10,
+                        help="weight of features-wise loss")
+    parser.add_argument("--qp_threshold", type=float, default=1.2,
+                        help="Threshold distance (in features space) for query-positive pairs")
+    parser.add_argument("--num_reranked_preds", type=int, default=5,
+                        help="number of predictions to re-rank at test time")
+    parser.add_argument("--kernel_sizes", nargs='+', default=[7, 5, 5, 5, 5, 5],
+                        help="size of kernels in conv layers of Homography Regression")
+    parser.add_argument("--channels", nargs='+', default=[225, 128, 128, 64, 64, 64, 64],
+                        help="num channels in conv layers of Homography Regression")
     # Other parameters
     parser.add_argument("--device", type=str, default="cuda",
                         choices=["cuda", "cpu"], help="_")
