@@ -231,7 +231,9 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         logging.info(f"Dataloader NIGHT: {len(dataloader_night)}")
 
         warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = next(ss_iterator)  # dal warping dataset prende le due immagini warped e i due punti delle intersezioni
-
+        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = warped_img_1.to(
+            args.device), warped_img_2.to(args.device), warped_intersection_points_1.to(
+            args.device), warped_intersection_points_2.to(args.device)  # warping dataset
 
     else:
         classifiers[current_group_num] = select_classifier(classifiers[current_group_num],
@@ -265,10 +267,6 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             if args.augmentation_device == "cuda":
                 images = gpu_augmentation(images)
 
-            # warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = to_cuda(next(ss_data_iter))
-        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = warped_img_1.to(
-            args.device), warped_img_2.to(args.device), warped_intersection_points_1.to(
-            args.device), warped_intersection_points_2.to(args.device)  # warping dataset
 
         with torch.no_grad():
             similarity_matrix_1to2, similarity_matrix_2to1 = model("similarity", [warped_img_1, warped_img_2])
