@@ -15,9 +15,8 @@ import cosface_loss
 import augmentations
 from datasets.test_dataset import TestDataset
 from datasets.train_dataset import TrainDataset
-from geowarp import GeoWarp
+import geowarp
 import test_geowarp
-from geowarp import FeatureExtractor
 
 torch.backends.cudnn.benchmark = True  # Provides a speedup
 
@@ -41,7 +40,7 @@ import geowarp_dataset
 #     model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
 #     logging.info(f"Using domain adaption")
 
-features_extractor = FeatureExtractor(args.backbone, args.fc_output_dim)
+features_extractor = geowarp.FeatureExtractor(args.backbone, args.fc_output_dim)
 global_features_dim = commons.get_output_dim(features_extractor, "gem")
 
 logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
@@ -52,8 +51,8 @@ if args.resume_model is not None:
     features_extractor.load_state_dict(model_state_dict)
     del model_state_dict
 
-homography_regression = GeoWarp.HomographyRegression(kernel_sizes=args.kernel_sizes, channels=args.channels, padding=1)
-model = GeoWarp.GeoWarp(features_extractor, homography_regression).cuda().eval()
+homography_regression = geowarp.HomographyRegression(kernel_sizes=args.kernel_sizes, channels=args.channels, padding=1)
+model = geowarp.GeoWarp(features_extractor, homography_regression).cuda().eval()
 model = torch.nn.DataParallel(model)
 
 #### Optimizer
