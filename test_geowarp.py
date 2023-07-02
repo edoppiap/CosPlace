@@ -110,8 +110,8 @@ def test(args: Namespace, eval_ds: Dataset, model: torch.nn.Module) -> Tuple[np.
                 del min_index
             else:
                 descriptors = model(images.to(args.device))
-            descriptors = descriptors.cpu().numpy()
-            all_descriptors[indices.numpy(), :] = descriptors
+                descriptors = descriptors.cpu().numpy()
+                all_descriptors[indices.numpy(), :] = descriptors
 
         logging.debug("Extracting queries descriptors for evaluation/testing using batch size 1")
         queries_infer_batch_size = 1
