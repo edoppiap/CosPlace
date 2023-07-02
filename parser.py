@@ -57,6 +57,12 @@ def parse_arguments(is_training: bool = True):
                         help="Batch size for inference (validating and testing)")
     parser.add_argument("--positive_dist_threshold", type=int, default=25,
                         help="distance in meters for a prediction to be considered a positive")
+    # Multi scale parameters
+    parser.add_argument("--multi_scale", action='store_true', help="Use multi scale")
+    parser.add_argument("--select_resolutions", type=float, default=[0.526, 0.588, 1, 1.7, 1.9], nargs="+",
+                        help="Usage: --select_resolution 1 2 4 6")
+    parser.add_argument("--multi_scale_method", type=str, default="avg", choices=["avg", "sum", "max", "min"],
+                        help="Usage:--multi_scale_method=avg")
     # Resume parameters
     parser.add_argument("--resume_train", type=str, default=None,
                         help="path to checkpoint to resume, e.g. logs/.../last_checkpoint.pth")
