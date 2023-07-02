@@ -104,10 +104,6 @@ logging.info(
 val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_dist_threshold)
 test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
                       positive_dist_threshold=args.positive_dist_threshold)
-test_tokyo_night_ds = TestDataset("/content/data/tokyo_xs/night_database/", queries_folder="queries",
-                      positive_dist_threshold=args.positive_dist_threshold)
-test_tokyo_day_ds = TestDataset("/content/data/tokyo_xs/day_database/", queries_folder="queries",
-                      positive_dist_threshold=args.positive_dist_threshold)
 logging.info(f"Validation set: {val_ds}")
 logging.info(f"Test set: {test_ds}")
 
@@ -350,15 +346,4 @@ model.load_state_dict(best_model_state_dict)
 
 logging.info(f"Now testing on the test set: {test_ds}")
 recalls, recalls_str = test.test(args, test_ds, model, args.num_preds_to_save)
-logging.info(f"{test_ds}: {recalls_str}")
-
-# Testing on both Tokyo Night and Tokyo Day
-logging.info(f"Now testing on the Tokyo set night: {test_tokyo_night_ds}")
-recalls, recalls_str = test.test(args, test_tokyo_night_ds, model, args.num_preds_to_save)
-logging.info(f"{test_tokyo_night_ds}: {recalls_str}")
-
-logging.info(f"Now testing on the Tokyo set day: {test_tokyo_day_ds}")
-recalls, recalls_str = test.test(args, test_tokyo_day_ds, model, args.num_preds_to_save)
-logging.info(f"{test_tokyo_day_ds}: {recalls_str}")
-
 logging.info("Experiment finished (without any errors)")
