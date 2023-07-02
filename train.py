@@ -94,13 +94,15 @@ logging.info(
 val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_dist_threshold)
 test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
                       positive_dist_threshold=args.positive_dist_threshold)
-test_tokyo_ds = TestDataset("/content/data/tokyo_xs/night_database", queries_folder="queries",
+test_tokyo_night_ds = TestDataset("/content/data/tokyo_xs/night_database/", queries_folder="queries",
+                      positive_dist_threshold=args.positive_dist_threshold)
+test_tokyo_day_ds = TestDataset("/content/data/tokyo_xs/day_database/", queries_folder="queries",
                       positive_dist_threshold=args.positive_dist_threshold)
 logging.info(f"Validation set: {val_ds}")
 logging.info(f"Test set: {test_ds}")
 
 # Dataset day label (1,1,1)
-groups_day = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
+groups_day = [TrainDataset(args, "/content/data/tokyo_xs/day_database/", M=args.M, alpha=args.alpha, N=args.N, L=args.L,
                            current_group=n, min_images_per_class=args.min_images_per_class, day=True) for n in
               range(args.groups_num)]
 # Each group has its own classifier, which depends on the number of classes in the group
@@ -351,10 +353,13 @@ logging.info(f"Now testing on the test set: {test_ds}")
 recalls, recalls_str = test.test(args, test_ds, model, args.num_preds_to_save)
 logging.info(f"{test_ds}: {recalls_str}")
 
+# Testing on both Tokyo Night and Tokyo Day
+logging.info(f"Now testing on the Tokyo set night: {test_tokyo_night_ds}")
+recalls, recalls_str = test.test(args, test_tokyo_night_ds, model, args.num_preds_to_save)
+logging.info(f"{test_tokyo_night_ds}: {recalls_str}")
 
-logging.info(f"Now testing on the Tokyo set: {test_tokyo_ds}")
-recalls, recalls_str = test.test(args, test_tokyo_ds, model, args.num_preds_to_save)
-logging.info(f"{test_tokyo_ds}: {recalls_str}")
-
+logging.info(f"Now testing on the Tokyo set day: {test_tokyo_day_ds}")
+recalls, recalls_str = test.test(args, test_tokyo_day_ds, model, args.num_preds_to_save)
+logging.info(f"{test_tokyo_day_ds}: {recalls_str}")
 
 logging.info("Experiment finished (without any errors)")
