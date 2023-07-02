@@ -94,6 +94,8 @@ logging.info(
 val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_dist_threshold)
 test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
                       positive_dist_threshold=args.positive_dist_threshold)
+test_tokyo_ds = TestDataset("/content/data/tokyo_xs/night_database", queries_folder="queries",
+                      positive_dist_threshold=args.positive_dist_threshold)
 logging.info(f"Validation set: {val_ds}")
 logging.info(f"Test set: {test_ds}")
 
@@ -118,7 +120,7 @@ logging.info(f"Day sunny trial group: {groups_day[0]} ")
 # Dataset night label (0,0,0)
 # path kaggle:  "/kaggle/working/data/tokyo_xs/night"
 # path to pc:
-groups_night = [TrainDataset(args, "/kaggle/working/data/tokyo_xs/night",
+groups_night = [TrainDataset(args, "/content/data/tokyo_xs/night_database/database",
                              M=args.M, alpha=args.alpha, N=args.N, L=args.L, current_group=n,
                              min_images_per_class=args.min_images_per_class, night=True) \
                 for n in range(args.groups_num)]
@@ -348,5 +350,11 @@ model.load_state_dict(best_model_state_dict)
 logging.info(f"Now testing on the test set: {test_ds}")
 recalls, recalls_str = test.test(args, test_ds, model, args.num_preds_to_save)
 logging.info(f"{test_ds}: {recalls_str}")
+
+
+logging.info(f"Now testing on the Tokyo set: {test_tokyo_ds}")
+recalls, recalls_str = test.test(args, test_tokyo_ds, model, args.num_preds_to_save)
+logging.info(f"{test_tokyo_ds}: {recalls_str}")
+
 
 logging.info("Experiment finished (without any errors)")
