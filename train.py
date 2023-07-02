@@ -190,7 +190,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             if args.loss == 'TripletMarginLoss':
                 augmented_descriptors = model(augmented)
                 augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
-                loss = criterion(output, augmented_output)
+                loss = criterion(descriptors, augmented_descriptors)
             elif args.loss == 'VICRegLoss':
                 loss = criterion(output)
             else:
