@@ -302,5 +302,5 @@ best_model_state_dict = torch.load(f"{args.output_folder}/best_model.pth")
 model.load_state_dict(best_model_state_dict)
 
 logging.info(f"Now testing on the test set: {test_ds}")
-recalls, recalls_str = test_geowarp.test(args, test_ds, model, args.num_preds_to_save)
+recalls, recalls_str = test_geowarp.test(args, test_ds, model)
 logging.info("Experiment finished (without any errors)")
