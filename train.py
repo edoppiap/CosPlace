@@ -141,7 +141,7 @@ if args.augmentation_device == "cuda":
     compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
     
     gpu_augmentation = T.Compose(compose)
-    if args.loss == "TripletMarginLoss":
+    if args.loss == "TripletMarginLoss" or args.loss == 'VICRegLoss':
         compose2 = []
         compose2.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
                                                           scale=[1-.5, 1]))
@@ -179,7 +179,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         
         if args.augmentation_device == "cuda":
             images = gpu_augmentation(images)
-            if args.loss == 'TripletMarginLoss':
+            if args.loss == 'TripletMarginLoss' or args.loss == 'VICRegLoss':
                 augmented = gpu_augmentation_2(images)    
                 
         
@@ -189,12 +189,10 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         if not args.use_amp16:
             descriptors = model(images)
             output = classifiers[current_group_num](descriptors, targets)
-            if args.loss == 'TripletMarginLoss':
+            if args.loss == 'TripletMarginLoss' or args.loss == 'VICRegLoss':
                 augmented_descriptors = model(augmented)
                 augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
                 loss = criterion(descriptors, augmented_descriptors)
-            elif args.loss == 'VICRegLoss':
-                loss = criterion(output)
             else:
                 loss = criterion(output, targets)
             loss.backward()
