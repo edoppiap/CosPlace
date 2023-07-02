@@ -193,7 +193,7 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
                 augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
                 loss = criterion(descriptors, augmented_descriptors, targets)
             elif args.loss == 'VICRegLoss':
-                loss = criterion(output)
+                loss = criterion(output, ref_emb=None)
             else:
                 loss = criterion(output, targets)
             loss.backward()
