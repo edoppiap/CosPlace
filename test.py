@@ -72,3 +72,4 @@ def test(args: Namespace, eval_ds: Dataset, model: torch.nn.Module,
         visualizations.save_preds(predictions[:, :num_preds_to_save], eval_ds, args.output_folder, args.save_only_wrong_preds)
     
     return recalls, recalls_str
+
