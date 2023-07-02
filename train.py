@@ -147,6 +147,7 @@ if args.augmentation_device == "cuda":
         compose2.append(T.RandomVerticalFlip(.5))
         compose2.append(T.RandomErasing(0.5))
         compose2.append(T.RandomPerspective(0.5))
+        compose2.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
         gpu_augmentation_2 = T.Compose(compose2)
     
 
