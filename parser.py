@@ -1,4 +1,3 @@
-
 import os
 import argparse
 
@@ -15,26 +14,19 @@ def parse_arguments(is_training: bool = True):
     # Model parameters
     parser.add_argument("--backbone", type=str, default="ResNet18",
                         choices=["VGG16", "ResNet18", "ResNet50", "ResNet101", "ResNet152", "vit_b_16", "vit_b_32",
-                                 "vit_l_16", "vit_l_32", "vit_h_14", "maxvit_t", "alexnet", "vgg16", "resnet18conv4", "resnet18conv5",
-                                 "resnet50conv4", "resnet50conv5", "resnet101conv4", "resnet101conv5",
-                                 "cct384", "vit"], help="_")
+                                 "vit_l_16", "vit_l_32", "vit_h_14", "maxvit_t"], help="_")
     parser.add_argument("--fc_output_dim", type=int, default=512,
                         help="Output dimension of final fully connected layer")
-    parser.add_argument('--pretrain', type=str, default="imagenet", choices=['imagenet', 'gldv2', 'places'],
-                        help="Select the pretrained weights for the starting network")
-    parser.add_argument('--resize', type=int, default=[480, 640], nargs=2, help="Resizing shape for images (HxW).")
-    parser.add_argument("--trunc_te", type=int, default=None, choices=list(range(0, 14)))
-    parser.add_argument("--freeze_te", type=int, default=None, choices=list(range(-1, 14)))
     # Optimizer
     parser.add_argument("--optimizer", type=str, default='AdamW',
-                        choices=["AdamW","Adam","SGD","Adagrad","LBFGS","Adadelta"],
+                        choices=["AdamW", "Adam", "SGD", "Adagrad", "LBFGS", "Adadelta"],
                         help="Optimizer to use")
     # Domain adaptation parameters & Data augmentation
     parser.add_argument("--domain_adapt", type=str, default=None,
                         help="It turns on Domain Adaptation training")
     # Scheduler
-    parser.add_argument('--scheduler', type=str, default='none', 
-                        choices=["StepLR","ReduceLROnPlateau","CosineAnnealignLR","ExponentialLR"],
+    parser.add_argument('--scheduler', type=str, default='none',
+                        choices=["StepLR", "ReduceLROnPlateau", "CosineAnnealignLR", "ExponentialLR"],
                         help='scheduler to use')
     # Training parameters
     parser.add_argument("--use_amp16", action="store_true",
@@ -77,18 +69,18 @@ def parse_arguments(is_training: bool = True):
     parser.add_argument("--num_workers", type=int, default=8, help="_")
     parser.add_argument("--num_preds_to_save", type=int, default=0,
                         help="At the end of training, save N preds for each query. "
-                        "Try with a small number like 3")
+                             "Try with a small number like 3")
     parser.add_argument("--save_only_wrong_preds", action="store_true",
                         help="When saving preds (if num_preds_to_save != 0) save only "
-                        "preds for difficult queries, i.e. with uncorrect first prediction")
+                             "preds for difficult queries, i.e. with uncorrect first prediction")
     # Paths parameters
     parser.add_argument("--dataset_folder", type=str, default=None,
                         help="path of the folder with train/val/test sets")
     parser.add_argument("--save_dir", type=str, default="default",
                         help="name of directory on which to save the logs, under logs/save_dir")
-    
+
     args = parser.parse_args()
-    
+
     if args.dataset_folder is None:
         try:
             args.dataset_folder = os.environ['SF_XL_PROCESSED_FOLDER']
@@ -96,21 +88,21 @@ def parse_arguments(is_training: bool = True):
             raise Exception("You should set parameter --dataset_folder or export " +
                             "the SF_XL_PROCESSED_FOLDER environment variable as such \n" +
                             "export SF_XL_PROCESSED_FOLDER=/path/to/sf_xl/processed")
-    
+
     if not os.path.exists(args.dataset_folder):
         raise FileNotFoundError(f"Folder {args.dataset_folder} does not exist")
-    
+
     if is_training:
         args.train_set_folder = os.path.join(args.dataset_folder, "train")
         if not os.path.exists(args.train_set_folder):
             raise FileNotFoundError(f"Folder {args.train_set_folder} does not exist")
-        
+
         args.val_set_folder = os.path.join(args.dataset_folder, "val")
         if not os.path.exists(args.val_set_folder):
             raise FileNotFoundError(f"Folder {args.val_set_folder} does not exist")
-    
+
     args.test_set_folder = os.path.join(args.dataset_folder, "test")
     if not os.path.exists(args.test_set_folder):
         raise FileNotFoundError(f"Folder {args.test_set_folder} does not exist")
-    
+
     return args

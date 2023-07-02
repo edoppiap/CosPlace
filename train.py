@@ -31,10 +31,11 @@ logging.info(f"The outputs are being saved in {args.output_folder}")
 
 #### Model
 if args.domain_adapt == 'True':
-    model = cosplace_network.GeoLocalizationNet(args)
+    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim,
+                                                alpha=0.05, domain_adapt="True")
     logging.info(f"Using domain adaption")
 else:
-    model = cosplace_network.GeoLocalizationNet(args)
+    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
     logging.info(f"Using domain adaption")
 
 logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
