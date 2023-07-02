@@ -186,132 +186,92 @@ if args.augmentation_device == "cuda":
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
 
-# If domain adaption is set to True we train
+# START TRAINING
 for epoch_num in range(start_epoch_num, args.epochs_num):
     #### Train
-    epoch_start_time = datetime.now()
-    current_group_num = epoch_num % args.groups_num
-
-
+    epoch_start_time = datetime.now()  # rn date
     # Select classifier and dataloader according to epoch
-    def select_classifier(classifier, optimizer):
-        classifier = classifier.to(args.device)
-        util.move_to_device(optimizer, args.device)
-        return classifier
+    current_group_num = epoch_num % args.groups_num
+    classifiers[current_group_num] = classifiers[current_group_num].to(args.device)
+    util.move_to_device(classifiers_optimizers[current_group_num], args.device)
+    dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
+                                            batch_size=args.batch_size, shuffle=True,
+                                            pin_memory=(args.device == "cuda"), drop_last=True)
+    # batch size = 32,same as cosplace to iterate in the dataset
+    dataloader_iterator = iter(dataloader)
+    # now i use the new one
+    # same things but for the two different datasets
+    ss_dataloader = commons.InfiniteDataLoader(ss_dataset[current_group_num], num_workers=args.num_workers,
+                                               batch_size=args.batch_size, shuffle=True,
+                                               pin_memory=(args.device == "cuda"), drop_last=True)
+    ss_data_iter = iter(ss_dataloader)
 
+    model = model.train()  # training mode
+    # epoch_losses = np.zeros((0, 3), dtype=np.float32)
+    # epoch_losses = np.zeros((0, 1), dtype=np.float32)
+    epoch_losses = np.zeros((0, 2), dtype=np.float32)
+    for iteration in tqdm(range(args.iterations_per_epoch), ncols=100):
+        images, targets, _ = next(dataloader_iterator)
+        images, targets = images.to(args.device), targets.to(args.device)
 
-    if args.domain_adapt == 'True':
-        classifiers[current_group_num] = select_classifier(classifiers[current_group_num],
-                                                           classifiers_optimizers[current_group_num])
-        classifiers_day[current_group_num] = select_classifier(classifiers_day[current_group_num],
-                                                               classifiers_optimizers_day[current_group_num])
-        classifiers_night[current_group_num] = select_classifier(classifiers_night[current_group_num],
-                                                                 classifiers_optimizers_night[current_group_num])
+        if args.augmentation_device == "cuda":
+            images = gpu_augmentation(images)
 
-        dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
-                                                batch_size=args.batch_size, shuffle=True,
-                                                pin_memory=(args.device == "cuda"), drop_last=True)
-        dataloader_day = commons.InfiniteDataLoader(groups_day[current_group_num], num_workers=args.num_workers,
-                                                    batch_size=args.batch_size, shuffle=True,
-                                                    pin_memory=(args.device == "cuda"), drop_last=True)
-        dataloader_night = commons.InfiniteDataLoader(groups_night[current_group_num], num_workers=args.num_workers,
-                                                      batch_size=args.batch_size, shuffle=True,
-                                                      pin_memory=(args.device == "cuda"), drop_last=True)
-        ss_dataloader = commons.InfiniteDataLoader(ss_dataset[current_group_num], num_workers=args.num_workers,
-                                                   batch_size=args.batch_size, shuffle=True,
-                                                   pin_memory=(args.device == "cuda"), drop_last=True)
-
-        dataloader_iterator = iter(dataloader)
-        dataloader_iterator_day = iter(dataloader_day)
-        dataloader_iterator_night = iter(dataloader_night)
-        ss_iterator = iter(ss_dataloader)
-
-        logging.info(f"Dataloader CLASSIC: {len(dataloader)}")
-        logging.info(f"Dataloader DAY: {len(dataloader_day)}")
-        logging.info(f"Dataloader NIGHT: {len(dataloader_night)}")
-
-        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = next(ss_iterator)  # dal warping dataset prende le due immagini warped e i due punti delle intersezioni
+        # warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = to_cuda(next(ss_data_iter))
+        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = next(
+            ss_data_iter)  # dal warping dataset prende le due immagini warped e i due punti delle intersezioni
         warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = warped_img_1.to(
             args.device), warped_img_2.to(args.device), warped_intersection_points_1.to(
             args.device), warped_intersection_points_2.to(args.device)  # warping dataset
+
         with torch.no_grad():
             similarity_matrix_1to2, similarity_matrix_2to1 = model("similarity", [warped_img_1, warped_img_2])
 
-    else:
-        classifiers[current_group_num] = select_classifier(classifiers[current_group_num],
-                                                           classifiers_optimizers[current_group_num])
-        dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
-                                                batch_size=args.batch_size, shuffle=True,
-                                                pin_memory=(args.device == "cuda"), drop_last=True)
-        dataloader_iterator = iter(dataloader)
-
-    model = model.train()
-    epoch_losses = np.zeros((0, 1), dtype=np.float32)
-
-    for iteration in tqdm(range(args.iterations_per_epoch), ncols=100):
-        if args.domain_adapt == 'True':
-            images, targets, _ = next(dataloader_iterator)
-            # images_day, targets_day, _ = next(dataloader_iterator_day)
-            # images_night, targets_night, _ = next(dataloader_iterator_night)
-
-            images, targets = images.to(args.device), targets.to(args.device)
-            # images_day, targets_day = images_day.to(args.device), targets_day.to(args.device)
-            # images_night, targets_night = images_night.to(args.device), targets_night.to(args.device)
-
-            if args.augmentation_device == "cuda":
-                images = gpu_augmentation(images)
-                # images_day = gpu_augmentation(images_day)
-                # images_night = gpu_augmentation(images_night)
-        else:
-            images, targets, _ = next(dataloader_iterator)
-            images, targets = images.to(args.device), targets.to(args.device)
-
-            if args.augmentation_device == "cuda":
-                images = gpu_augmentation(images)
-
-        model_optimizer.zero_grad()
+        model_optimizer.zero_grad()  # setta il gradiente a zero per evitare double counting (passaggio classico dopo ogni iterazione)
         classifiers_optimizers[current_group_num].zero_grad()
 
-        descriptors = model("features_extractor", [images, "global"])
-        output = classifiers[current_group_num](descriptors, targets)
-        loss = criterion(output, targets)
-        loss.backward()
-        loss = loss.item()
-        del output, images
-        # ss_loss
-        if args.ss_w != 0:
-            pred_warped_intersection_points_1 = model("regression", similarity_matrix_1to2)
-            pred_warped_intersection_points_2 = model("regression", similarity_matrix_2to1)
-            ss_loss = (mse(pred_warped_intersection_points_1[:, :4], warped_intersection_points_1) +
-                       mse(pred_warped_intersection_points_1[:, 4:], warped_intersection_points_2) +
-                       mse(pred_warped_intersection_points_2[:, :4], warped_intersection_points_2) +
-                       mse(pred_warped_intersection_points_2[:, 4:], warped_intersection_points_1))
-            # ss_loss = compute_loss(ss_loss, args.ss_w)
-            ss_loss.backward()
-            ss_loss = ss_loss.item()
-            del pred_warped_intersection_points_1, pred_warped_intersection_points_2
-        else:
-            ss_loss = 0
-        epoch_losses = np.concatenate((epoch_losses, np.array([[loss, ss_loss]])))  # both losses
-        del loss, ss_loss
-        # step update
-        model_optimizer.step()
-        classifiers_optimizers[current_group_num].step()
-    else:  # Use AMP 16
-        with torch.cuda.amp.autocast():
+        if not args.use_amp16:
             descriptors = model("features_extractor", [images, "global"])
             output = classifiers[current_group_num](descriptors, targets)
             loss = criterion(output, targets)
-        scaler.scale(loss).backward()
-        epoch_losses = np.append(epoch_losses, loss.item())
-        del loss, output, images
-        scaler.step(model_optimizer)
-        scaler.step(classifiers_optimizers[current_group_num])
-        scaler.update()
+            loss.backward()
+            loss = loss.item()
+            del output, images
+            # ss_loss
+            if args.ss_w != 0:
+                pred_warped_intersection_points_1 = model("regression", similarity_matrix_1to2)
+                pred_warped_intersection_points_2 = model("regression", similarity_matrix_2to1)
+                ss_loss = (mse(pred_warped_intersection_points_1[:, :4], warped_intersection_points_1) +
+                           mse(pred_warped_intersection_points_1[:, 4:], warped_intersection_points_2) +
+                           mse(pred_warped_intersection_points_2[:, :4], warped_intersection_points_2) +
+                           mse(pred_warped_intersection_points_2[:, 4:], warped_intersection_points_1))
+                # ss_loss = compute_loss(ss_loss, args.ss_w)
+                ss_loss.backward()
+                ss_loss = ss_loss.item()
+                del pred_warped_intersection_points_1, pred_warped_intersection_points_2
+            else:
+                ss_loss = 0
+            epoch_losses = np.concatenate((epoch_losses, np.array([[loss, ss_loss]])))  # both losses
+            del loss, ss_loss
+            # step update
+            model_optimizer.step()
+            classifiers_optimizers[current_group_num].step()
+            model_optimizer.step()
+        else:  # Use AMP 16
+            with torch.cuda.amp.autocast():
+                descriptors = model("features_extractor", [images, "global"])
+                output = classifiers[current_group_num](descriptors, targets)
+                loss = criterion(output, targets)
+            scaler.scale(loss).backward()
+            epoch_losses = np.append(epoch_losses, loss.item())
+            del loss, output, images
+            scaler.step(model_optimizer)
+            scaler.step(classifiers_optimizers[current_group_num])
+            scaler.update()
 
-        # remember to concatenate both losses
-        epoch_losses = np.concatenate((epoch_losses, np.array([[loss, ss_loss]])))  # both losses
-        del loss, ss_loss
+            # remember to concatenate both losses
+            epoch_losses = np.concatenate((epoch_losses, np.array([[loss, ss_loss]])))  # both losses
+            del loss, ss_loss
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
     logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
