@@ -52,7 +52,7 @@ model = model.to(args.device).train()
 if args.loss == 'CrossEntropyLoss':
     criterion = torch.nn.CrossEntropyLoss()
 elif args.loss == 'TripletMarginLoss':
-    criterion = losses.SelfSupervisedLoss(losses.TripletMarginLoss())
+    criterion = losses.SelfSupervisedLoss(losses.TripletMarginLoss(margin=0.05))
 elif args.loss == 'VICRegLoss':
     criterion = losses.VICRegLoss(invariance_lambda=25, 
                                 variance_mu=25, 
