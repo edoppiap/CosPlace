@@ -1,4 +1,4 @@
-
+import os
 import sys
 import torch
 import logging
@@ -32,7 +32,13 @@ logging.info(f"Arguments: {args}")
 logging.info(f"The outputs are being saved in {args.output_folder}")
 
 #### Model
-model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim)
+if args.domain_adapt == 'True':
+    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim,
+                                                alpha=0.05, domain_adapt="True")
+    logging.info(f"Using domain adaption")
+else:
+    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
+    logging.info(f"Using domain adaption")
 
 ### convenient function from pytorch-metric-learning ###
 def get_all_embeddings(dataset, model):
@@ -64,6 +70,7 @@ elif args.loss == 'VICRegLoss':
 #### Optimizer
 # 
 #UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
+
 if args.optimizer == "Adam":
     model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 elif args.optimizer == "AdamW":
@@ -94,13 +101,15 @@ groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, 
                        current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]
 # Each group has its own classifier, which depends on the number of classes in the group
 classifiers = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups]
-#UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
-#classifiers_optimizers = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
-classifiers_optimizers = [torch.optim.AdamW(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
+# UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
+# classifiers_optimizers = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
+classifiers_optimizers = [torch.optim.AdamW(classifier.parameters(), lr=args.classifiers_lr) for classifier in
+                          classifiers]
 
 logging.info(f"Using {len(groups)} groups")
 logging.info(f"The {len(groups)} groups have respectively the following number of classes {[len(g) for g in groups]}")
-logging.info(f"The {len(groups)} groups have respectively the following number of images {[g.get_images_num() for g in groups]}")
+logging.info(
+    f"The {len(groups)} groups have respectively the following number of images {[g.get_images_num() for g in groups]}")
 
 val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_dist_threshold)
 test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
@@ -108,13 +117,53 @@ test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
 logging.info(f"Validation set: {val_ds}")
 logging.info(f"Test set: {test_ds}")
 
+# Dataset day label (1,1,1)
+groups_day = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
+                           current_group=n, min_images_per_class=args.min_images_per_class, day=True) for n in
+              range(args.groups_num)]
+# Each group has its own classifier, which depends on the number of classes in the group
+classifiers_day = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups_day]
+classifiers_optimizers_day = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in
+                              classifiers_day]
+
+# How many classes and images for the day domain label prediction
+logging.info(f"Using {len(groups_day)} groups")
+logging.info(
+    f"The {len(groups_day)} groups have respectively the following number of classes {[len(g) for g in groups_day]}")
+logging.info(
+    f"The {len(groups_day)} groups have respectively the following number of images {[g.get_images_num() for g in groups_day]}")
+
+logging.info(f"Day sunny trial group: {groups_day[0]} ")
+
+# Dataset night label (0,0,0)
+# path kaggle:  "/kaggle/working/data/tokyo_xs/night"
+# path to pc:
+groups_night = [TrainDataset(args, "/kaggle/working/data/tokyo_xs/night",
+                             M=args.M, alpha=args.alpha, N=args.N, L=args.L, current_group=n,
+                             min_images_per_class=args.min_images_per_class, night=True) \
+                for n in range(args.groups_num)]
+# Each group has its own classifier, which depends on the number of classes in the group1
+classifiers_night = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups_night]
+classifiers_optimizers_night = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in
+                                classifiers_night]
+
+# How many classes and images for the night domain label prediction
+logging.info(f"Using {len(groups_night)} groups")
+logging.info(
+    f"The {len(groups_night)} groups have respectively the following number of classes {[len(g) for g in groups_night]}")
+logging.info(
+    f"The {len(groups_night)} groups have respectively the following number of images {[g.get_images_num() for g in groups_night]}")
+
+logging.info(f"Day night version trial group: {groups_night[0]} ")
+
 #### Resume
 if args.resume_train:
     model, model_optimizer, classifiers, classifiers_optimizers, best_val_recall1, start_epoch_num = \
         util.resume_train(args, args.output_folder, model, model_optimizer, classifiers, classifiers_optimizers)
     model = model.to(args.device)
     epoch_num = start_epoch_num - 1
-    logging.info(f"Resuming from epoch {start_epoch_num} with best R@1 {best_val_recall1:.1f} from checkpoint {args.resume_train}")
+    logging.info(
+        f"Resuming from epoch {start_epoch_num} with best R@1 {best_val_recall1:.1f} from checkpoint {args.resume_train}")
 else:
     best_val_recall1 = start_epoch_num = 0
 
@@ -125,20 +174,23 @@ logging.info(f"There are {len(groups[0])} classes for the first group, " +
              f"with batch_size {args.batch_size}, therefore the model sees each class (on average) " +
              f"{args.iterations_per_epoch * args.batch_size / len(groups[0]):.1f} times per epoch")
 
-
 if args.augmentation_device == "cuda":
     compose = []
     compose.append(augmentations.DeviceAgnosticColorJitter(brightness=args.brightness,
-                                                    contrast=args.contrast,
-                                                    saturation=args.saturation,
-                                                    hue=args.hue))
+                                                           contrast=args.contrast,
+                                                           saturation=args.saturation,
+                                                           hue=args.hue))
+    compose.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
+                                                                 scale=[1 - args.random_resized_crop, 1]))
+    compose.append(augmentations.DeviceAgnosticRandomHorizontalFlip(args.horizontal_flip_prob))
+    compose.append(T.RandomVerticalFlip(args.vertical_flip_prob))
     if args.autoaugment_policy:
-        for policy_name in args.autoaugment_policy: # it can be more than one
+        for policy_name in args.autoaugment_policy:  # it can be more than one
             logging.info(f"Selected AutoAugment policy: {policy_name}")
-            compose.append(augmentations.DeviceAgnosticAutoAugment(policy_name = policy_name,
-                                                    interpolation = T.InterpolationMode.NEAREST))
+            compose.append(augmentations.DeviceAgnosticAutoAugment(policy_name=policy_name,
+                                                                   interpolation=T.InterpolationMode.NEAREST))
     compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-    
+
     gpu_augmentation = T.Compose(compose)
     if args.loss == "TripletMarginLoss" or args.loss == 'VICRegLoss':
         compose2 = []
@@ -155,36 +207,83 @@ if args.augmentation_device == "cuda":
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
 
+# If domain adaption is set to True we train
 for epoch_num in range(start_epoch_num, args.epochs_num):
-    
     #### Train
     epoch_start_time = datetime.now()
-    # Select classifier and dataloader according to epoch
     current_group_num = epoch_num % args.groups_num
-    classifiers[current_group_num] = classifiers[current_group_num].to(args.device)
-    util.move_to_device(classifiers_optimizers[current_group_num], args.device)
-    
-    dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
-                                            batch_size=args.batch_size, shuffle=True,
-                                            pin_memory=(args.device == "cuda"), drop_last=True)
-    
-    dataloader_iterator = iter(dataloader)
+
+
+    # Select classifier and dataloader according to epoch
+    def select_classifier(classifier, optimizer):
+        classifier = classifier.to(args.device)
+        util.move_to_device(optimizer, args.device)
+        return classifier
+
+
+    if args.domain_adapt == 'True':
+        classifiers[current_group_num] = select_classifier(classifiers[current_group_num],
+                                                           classifiers_optimizers[current_group_num])
+        classifiers_day[current_group_num] = select_classifier(classifiers_day[current_group_num],
+                                                               classifiers_optimizers_day[current_group_num])
+        classifiers_night[current_group_num] = select_classifier(classifiers_night[current_group_num],
+                                                                 classifiers_optimizers_night[current_group_num])
+
+        dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
+                                                batch_size=args.batch_size, shuffle=True,
+                                                pin_memory=(args.device == "cuda"), drop_last=True)
+        dataloader_day = commons.InfiniteDataLoader(groups_day[current_group_num], num_workers=args.num_workers,
+                                                    batch_size=args.batch_size, shuffle=True,
+                                                    pin_memory=(args.device == "cuda"), drop_last=True)
+        dataloader_night = commons.InfiniteDataLoader(groups_night[current_group_num], num_workers=args.num_workers,
+                                                      batch_size=args.batch_size, shuffle=True,
+                                                      pin_memory=(args.device == "cuda"), drop_last=True)
+
+        dataloader_iterator = iter(dataloader)
+        dataloader_iterator_day = iter(dataloader_day)
+        dataloader_iterator_night = iter(dataloader_night)
+
+        logging.info(f"Dataloader CLASSIC: {len(dataloader)}")
+        logging.info(f"Dataloader DAY: {len(dataloader_day)}")
+        logging.info(f"Dataloader NIGHT: {len(dataloader_night)}")
+
+    else:
+        classifiers[current_group_num] = select_classifier(classifiers[current_group_num],
+                                                           classifiers_optimizers[current_group_num])
+        dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
+                                                batch_size=args.batch_size, shuffle=True,
+                                                pin_memory=(args.device == "cuda"), drop_last=True)
+        dataloader_iterator = iter(dataloader)
+
     model = model.train()
-    
     epoch_losses = np.zeros((0, 1), dtype=np.float32)
+
     for iteration in tqdm(range(args.iterations_per_epoch), ncols=100):
-        images, targets, _ = next(dataloader_iterator)
-        images, targets = images.to(args.device), targets.to(args.device)
-        
-        if args.augmentation_device == "cuda":
-            images = gpu_augmentation(images)
-            if args.loss == 'TripletMarginLoss':
-                augmented = gpu_augmentation_2(images)    
-                
-        
+        if args.domain_adapt == 'True':
+            images, targets, _ = next(dataloader_iterator)
+            images_day, targets_day, _ = next(dataloader_iterator_day)
+            images_night, targets_night, _ = next(dataloader_iterator_night)
+
+            images, targets = images.to(args.device), targets.to(args.device)
+            images_day, targets_day = images_day.to(args.device), targets_day.to(args.device)
+            images_night, targets_night = images_night.to(args.device), targets_night.to(args.device)
+
+            if args.augmentation_device == "cuda":
+                images = gpu_augmentation(images)
+                images_day = gpu_augmentation(images_day)
+                images_night = gpu_augmentation(images_night)
+        else:
+            images, targets, _ = next(dataloader_iterator)
+            images, targets = images.to(args.device), targets.to(args.device)
+
+            if args.augmentation_device == "cuda":
+                images = gpu_augmentation(images)
+                if args.loss == 'TripletMarginLoss':
+                  augmented = gpu_augmentation_2(images)   
+
         model_optimizer.zero_grad()
         classifiers_optimizers[current_group_num].zero_grad()
-        
+
         if not args.use_amp16:
             descriptors = model(images)
             output = classifiers[current_group_num](descriptors, targets)
@@ -199,21 +298,64 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             loss.backward()
             epoch_losses = np.append(epoch_losses, loss.item())
             del loss, output, images
+
+            if args.domain_adapt == 'True':
+                descriptors_day = model(images_day, alpha=0.05)
+                output_day = classifiers_day[current_group_num](descriptors_day, targets_day)
+                loss_day = criterion(output_day, targets_day)
+
+                descriptors_night = model(images_night, alpha=0.05)
+                output_night = classifiers_night[current_group_num](descriptors_night, targets_night)
+                loss_night = criterion(output_night, targets_night)
+
+                loss_domain = loss_night + loss_day
+                loss_domain.backward()
+
+                epoch_losses = np.append(epoch_losses, loss_day.item())
+                epoch_losses = np.append(epoch_losses, loss_night.item())
+                del loss_day, loss_night, output_day, output_night, images_day, images_night
+                classifiers_optimizers_day[current_group_num].step()
+                classifiers_optimizers_night[current_group_num].step()
+
             model_optimizer.step()
             classifiers_optimizers[current_group_num].step()
+
         else:  # Use AMP 16
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
                 output = classifiers[current_group_num](descriptors, targets)
                 loss = criterion(output, targets)
+
+                if args.domain_adapt == 'True':
+                    descriptors_day = model(images_day)
+                    output_day = classifiers_day[current_group_num](descriptors_day, targets_day)
+                    loss_day = criterion(output_day, targets_day)
+
+                    descriptors_night = model(images_night)
+                    output_night = classifiers_night[current_group_num](descriptors_night, targets_night)
+                    loss_night = criterion(output_night, targets_night)
+
+                    loss_domain = loss_night + loss_day
+
             scaler.scale(loss).backward()
             epoch_losses = np.append(epoch_losses, loss.item())
             del loss, output, images
+
+            if args.domain_adapt == 'True':
+                scaler.scale(loss_day).backward()
+                scaler.scale(loss_night).backward()
+
+                epoch_losses = np.append(epoch_losses, loss_day.item())
+                epoch_losses = np.append(epoch_losses, loss_night.item())
+                del loss_day, loss_night, output_day, output_night, images_day, images_night
+                scaler.step(classifiers_optimizers_day[current_group_num])
+                scaler.step(classifiers_optimizers_night[current_group_num])
+
             scaler.step(model_optimizer)
             scaler.step(classifiers_optimizers[current_group_num])
             scale = scaler.get_scale()
             scaler.update()
-    
+
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
     
@@ -225,23 +367,26 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         else:
             scheduler.step()
     
+
     #### Evaluation
     recalls, recalls_str = test.test(args, val_ds, model)
-    logging.info(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, {val_ds}: {recalls_str[:20]}")
+    logging.info(
+        f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, {val_ds}: {recalls_str[:20]}")
     is_best = recalls[0] > best_val_recall1
     best_val_recall1 = max(recalls[0], best_val_recall1)
+
     # Save checkpoint, which contains all training parameters
-    util.save_checkpoint({
+    checkpoint = {
         "epoch_num": epoch_num + 1,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": model_optimizer.state_dict(),
         "classifiers_state_dict": [c.state_dict() for c in classifiers],
         "optimizers_state_dict": [c.state_dict() for c in classifiers_optimizers],
         "best_val_recall1": best_val_recall1
-    }, is_best, args.output_folder)
+    }
+    util.save_checkpoint(checkpoint, is_best, args.output_folder)
 
-
-logging.info(f"Trained for {epoch_num+1:02d} epochs, in total in {str(datetime.now() - start_time)[:-7]}")
+logging.info(f"Trained for {epoch_num + 1:02d} epochs, in total in {str(datetime.now() - start_time)[:-7]}")
 
 #### Test best model on test set v1
 best_model_state_dict = torch.load(f"{args.output_folder}/best_model.pth")
