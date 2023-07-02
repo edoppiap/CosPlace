@@ -1,4 +1,3 @@
-import os
 import sys
 import torch
 import logging
@@ -14,12 +13,11 @@ import parser
 import commons
 import cosface_loss
 import augmentations
-from cosplace_model import cosplace_network
 from datasets.test_dataset import TestDataset
 from datasets.train_dataset import TrainDataset
 from geowarp import GeoWarp
 import test_geowarp
-from geowarp.geowarp import FeatureExtractor
+from geowarp import FeatureExtractor
 
 torch.backends.cudnn.benchmark = True  # Provides a speedup
 
