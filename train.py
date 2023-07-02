@@ -324,7 +324,14 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
                 output = classifiers[current_group_num](descriptors, targets)
-                loss = criterion(output, targets)
+                if args.loss == 'TripletMarginLoss':
+                    augmented_descriptors = model(augmented)
+                    augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
+                    loss = criterion(descriptors, augmented_descriptors)
+                elif args.loss == 'VICRegLoss':
+                    loss = criterion(output, ref_emb=None)
+                else:
+                    loss = criterion(output, targets)
 
                 if args.domain_adapt == 'True':
                     descriptors_day = model(images_day)
