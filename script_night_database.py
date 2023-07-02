@@ -10,39 +10,39 @@ output_dirs = [
     '/content/data/tokyo_xs/day_database/queries'
 ]
 
-# Create the output directories if they don't exist
+# Creare le directory di output se non esistono
 for dir in output_dirs:
     if not os.path.exists(dir):
         os.makedirs(dir)
 
-# Brightness thresholds to determine if an image is nighttime or daytime
-night_brightness_threshold = 80
-day_brightness_threshold = 120
+# Soglie di luminosità per determinare se un'immagine è notturna o diurna
+night_brightness_threshold = 85
+day_brightness_threshold = 170
 
 for i in range(len(input_dirs)):
     input_dir = input_dirs[i]
-    output_dir = output_dirs[i * 2]  # Output directory for nighttime images
-    output_dir_day = output_dirs[i * 2 + 1]  # Output directory for daytime images
+    output_dir = output_dirs[i * 2]  # Directory di output per le immagini notturne
+    output_dir_day = output_dirs[i * 2 + 1]  # Directory di output per le immagini diurne
 
     for filename in os.listdir(input_dir):
         if filename.endswith('.jpg') or filename.endswith('.png'):
-            # Read the image in grayscale
-            img = cv2.imread(os.path.join(input_dir, filename), cv2.IMREAD_GRAYSCALE)
+            # Leggere l'immagine a colori
+            img = cv2.imread(os.path.join(input_dir, filename))
 
-            # Calculate the average brightness of the image
+            # Calcolare la luminosità media dell'immagine
             brightness = np.mean(img)
 
-            # If the image is below the brightness threshold, consider it nighttime
+            # Se l'immagine è al di sotto della soglia di luminosità, considerarla notturna
             if brightness < night_brightness_threshold:
-                # Copy the image to the nighttime output directory
+                # Copiare l'immagine nella directory di output notturno
                 cv2.imwrite(os.path.join(output_dir, filename), img)
-            # If the image is above the day brightness threshold, consider it daytime
+            # Se l'immagine è sopra la soglia di luminosità diurna, considerarla diurna
             elif brightness > day_brightness_threshold:
-                # Copy the image to the daytime output directory
+                # Copiare l'immagine nella directory di output diurno
                 cv2.imwrite(os.path.join(output_dir_day, filename), img)
 
-print("Correctly generated datasets:")
+print("Datasets generati correttamente:")
 for i in range(len(output_dirs)):
     dir = output_dirs[i]
-    print(f"Output directory: {dir}")
-    print(f"Files in directory: {os.listdir(dir)}")
+    print(f"Directory di output: {dir}")
+    print(f"File nella directory: {os.listdir(dir)}")
