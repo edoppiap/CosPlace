@@ -123,6 +123,13 @@ def get_backbone(backbone_name : str) -> Tuple[torch.nn.Module, int]:
                 params.requires_grad = False
         logging.debug(f"Train only layer3 and layer4 of the {backbone_name}, freeze the previous ones")
         layers = list(backbone.children())[:-2]  # Remove avg pooling and FC layer
+        
+    elif backbone_name.startswith("efficientnet"):
+        layers = list(backbone.children())[:-2] # Remove avg pooling and FC layer
+        for layer in layers[:-2]:
+            for p in layer.parameters():
+                p.requires_grad = False
+        logging.debug(f"Train last layers of the efficientnet, freeze the previous ones")
     
     elif backbone_name == "VGG16":
         layers = list(backbone.features.children())[:-2]  # Remove avg pooling and FC layer
