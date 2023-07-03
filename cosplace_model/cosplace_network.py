@@ -3,6 +3,7 @@ import logging
 import torchvision
 from torch import nn
 from torch.autograd import Function
+from os.path import join
 from typing import Tuple
 from google_drive_downloader import GoogleDriveDownloader as gdd
 
@@ -102,15 +103,17 @@ class GeoLocalizationNet(nn.Module):
             x = self.aggregation(x)  # etichette UTM
             return x
         
-def get_pretrained_places_torchvision_model(backbone_name: str) -> torch.nn.Module:    
+def get_pretrained_places_torchvision_model(backbone_name: str) -> torch.nn.Module:
     if backbone_name.startswith("resnet18"):
-        file_path = ("data/pretrained_on_places/resnet18_places.pth")
+        model_name = "resnet18_places.pth"
         model = torchvision.models.resnet18(num_classes=365)
         gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS["resnet18_places"], dest_path=file_path)
     elif backbone_name == "VGG16":
-        file_path = ("data/pretrained_on_places/vgg16_places.pth")
+        model_name = "vgg16_places.pth"
         model = torchvision.models.vgg16(num_classes = 365)
         gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS["vgg16_places"])
+        
+    file_path = join("data", "pretrained_on_places", model_name)
     state_dict = torch.load(file_path, map_location=torch.device('cpu'))
     model.load_state_dict(state_dict)
     return model  
