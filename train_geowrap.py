@@ -157,8 +157,6 @@ if __name__ == "__main__":
     logging.info(f"Validation set: {val_ds}")
     logging.info(f"Test set: {test_ds}")
 
-    ss_dataset = geowarp_dataset.HomographyDataset(root_path=f"{args.datasets_folder}/{args.dataset_name}/train",
-                                                k=args.k)
     ss_dataloader = commons.InfiniteDataLoader(ss_dataset, shuffle=True, batch_size=args.batch_size_ss,
                                                num_workers=args.ss_num_workers, pin_memory=True, drop_last=True)
     ss_data_iter = iter(ss_dataloader)
