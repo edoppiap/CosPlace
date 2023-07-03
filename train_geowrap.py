@@ -78,6 +78,8 @@ if __name__ == "__main__":
                         help="num_workers for self-supervised loss")
     parser.add_argument("--qp_num_workers", type=int, default=4,
                         help="num_workers for weakly supervised losses")
+    parser.add_argument("--groups_num", type=int, default=8, help="_")
+
 
     # Test parameters
     parser.add_argument("--num_reranked_preds", type=int, default=5,
