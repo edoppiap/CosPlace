@@ -7,6 +7,8 @@ from tqdm import tqdm
 import multiprocessing
 from datetime import datetime
 import torchvision.transforms as T
+from pytorch_metric_learning import distances, losses, miners, reducers, testers
+
 
 import test
 import util
@@ -38,6 +40,11 @@ else:
     model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
     logging.info(f"Using domain adaption")
 
+### convenient function from pytorch-metric-learning ###
+def get_all_embeddings(dataset, model):
+    tester = testers.BaseTester()
+    return tester.get_all_embeddings(dataset, model)
+
 logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
 
 if args.resume_model is not None:
@@ -47,9 +54,23 @@ if args.resume_model is not None:
 
 model = model.to(args.device).train()
 
+### Loss 
+if args.loss == 'CrossEntropyLoss':
+    criterion = torch.nn.CrossEntropyLoss()
+elif args.loss == 'TripletMarginLoss':
+    criterion = losses.SelfSupervisedLoss(losses.TripletMarginLoss(margin=0.05))
+elif args.loss == 'VICRegLoss':
+    criterion = losses.VICRegLoss(invariance_lambda=25, 
+                                variance_mu=25, 
+                                covariance_v=1, 
+                                eps=1e-4)
+    
+    
+    
 #### Optimizer
-criterion = torch.nn.CrossEntropyLoss()
-# UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
+# 
+#UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
+
 if args.optimizer == "Adam":
     model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 elif args.optimizer == "AdamW":
@@ -67,15 +88,14 @@ elif args.optimizer == "Adadelta":
 if args.scheduler == 'StepLR':
     scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
 elif args.scheduler == 'ReduceLROnPlateau':
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min')
-elif args.scheduler == 'CosineAnnealingLR':
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min') 
+elif args.scheduler == 'CosineAnnealignLR':
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
-# Add more elif conditions for other schedulers you want to use
 elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
-    print("Invalid scheduler choice")
-
+    scheduler = None
+    
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
                        current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]
@@ -176,6 +196,17 @@ if args.augmentation_device == "cuda":
     compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
 
     gpu_augmentation = T.Compose(compose)
+    if args.loss == "TripletMarginLoss" or args.loss == 'VICRegLoss':
+        compose2 = []
+        compose2.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
+                                                          scale=[1-.5, 1]))
+        compose2.append(augmentations.DeviceAgnosticRandomHorizontalFlip(.5))
+        compose2.append(T.RandomVerticalFlip(.5))
+        compose2.append(T.RandomErasing(0.5))
+        compose2.append(T.RandomPerspective(0.5))
+        compose2.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
+        gpu_augmentation_2 = T.Compose(compose2)
+    
 
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
@@ -251,6 +282,8 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
 
             if args.augmentation_device == "cuda":
                 images = gpu_augmentation(images)
+                if args.loss == 'TripletMarginLoss':
+                  augmented = gpu_augmentation_2(images)   
 
         model_optimizer.zero_grad()
         classifiers_optimizers[current_group_num].zero_grad()
@@ -258,7 +291,14 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         if not args.use_amp16:
             descriptors = model(images)
             output = classifiers[current_group_num](descriptors, targets)
-            loss = criterion(output, targets)
+            if args.loss == 'TripletMarginLoss':
+                augmented_descriptors = model(augmented)
+                augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
+                loss = criterion(descriptors, augmented_descriptors)
+            elif args.loss == 'VICRegLoss':
+                loss = criterion(output, ref_emb=None)
+            else:
+                loss = criterion(output, targets)
             loss.backward()
             epoch_losses = np.append(epoch_losses, loss.item())
             del loss, output, images
@@ -288,7 +328,14 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
             with torch.cuda.amp.autocast():
                 descriptors = model(images)
                 output = classifiers[current_group_num](descriptors, targets)
-                loss = criterion(output, targets)
+                if args.loss == 'TripletMarginLoss':
+                    augmented_descriptors = model(augmented)
+                    augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
+                    loss = criterion(descriptors, augmented_descriptors)
+                elif args.loss == 'VICRegLoss':
+                    loss = criterion(output, ref_emb=None)
+                else:
+                    loss = criterion(output, targets)
 
                 if args.domain_adapt == 'True':
                     descriptors_day = model(images_day)
@@ -317,13 +364,20 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
 
             scaler.step(model_optimizer)
             scaler.step(classifiers_optimizers[current_group_num])
+            scale = scaler.get_scale()
             scaler.update()
 
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
-
-    logging.debug(
-        f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, loss = {epoch_losses.mean():.4f}")
+    
+    logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
+                  f"loss = {epoch_losses.mean():.4f}")
+    if scheduler is not None:
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(epoch_losses.mean())
+        else:
+            scheduler.step()
+    
 
     #### Evaluation
     recalls, recalls_str = test.test(args, val_ds, model)
