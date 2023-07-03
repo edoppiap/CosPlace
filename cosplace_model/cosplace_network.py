@@ -13,6 +13,8 @@ feature learning. It reverses gradients during training by multiplying the negat
 'alpha' value. This technique enhances the model's ability to generalize across different domains, 
 resulting in improved performance on the target domain.
 """
+
+
 class GradientReversalFunction(Function):
     @staticmethod
     def forward(ctx, x, alpha):
@@ -32,7 +34,6 @@ class RevGrad(nn.Module):
 
     def forward(self, x):
         return GradientReversalFunction.apply(x, self.alpha)
-
 
 
 # The number of channels in the last convolutional layer, the one before average pooling
@@ -59,7 +60,7 @@ CHANNELS_NUM_IN_LAST_CONV = {
 class GeoLocalizationNet(nn.Module):
     def __init__(self, backbone: str, fc_output_dim: int, alpha: float = None, domain_adapt: str = None):
         """Return a model for GeoLocalization.
-        
+
         Args:
             backbone (str): which torchvision backbone to use. Must be VGG16 or a ResNet.
             fc_output_dim (int): the output dimension of the last fc layer, equivalent to the descriptors dimension.
@@ -106,14 +107,15 @@ def get_pretrained_torchvision_model(backbone_name: str) -> torch.nn.Module:
     model from torchvision. Examples of backbone_name are 'VGG16' or 'ResNet18'
     """
     try:  # Newer versions of pytorch require to pass weights=weights_module.DEFAULT
-        weights_module = getattr(__import__('torchvision.models', fromlist=[f"{backbone_name}_Weights"]), f"{backbone_name}_Weights")
+        weights_module = getattr(__import__('torchvision.models', fromlist=[f"{backbone_name}_Weights"]),
+                                 f"{backbone_name}_Weights")
         model = getattr(torchvision.models, backbone_name.lower())(weights=weights_module.DEFAULT)
     except (ImportError, AttributeError):  # Older versions of pytorch require to pass pretrained=True
         model = getattr(torchvision.models, backbone_name.lower())(pretrained=True)
     return model
 
 
-def get_backbone(backbone_name : str) -> Tuple[torch.nn.Module, int]:
+def get_backbone(backbone_name: str) -> Tuple[torch.nn.Module, int]:
     backbone = get_pretrained_torchvision_model(backbone_name)
     if backbone_name.startswith("ResNet"):
         for name, child in backbone.named_children():
@@ -123,6 +125,7 @@ def get_backbone(backbone_name : str) -> Tuple[torch.nn.Module, int]:
                 params.requires_grad = False
         logging.debug(f"Train only layer3 and layer4 of the {backbone_name}, freeze the previous ones")
         layers = list(backbone.children())[:-2]  # Remove avg pooling and FC layer
+
         
     elif backbone_name.startswith("efficientnet"):
         layers = list(backbone.children())[:-2] # Remove avg pooling and FC layer
@@ -130,15 +133,15 @@ def get_backbone(backbone_name : str) -> Tuple[torch.nn.Module, int]:
             for p in layer.parameters():
                 p.requires_grad = False
         logging.debug(f"Train last layers of the efficientnet, freeze the previous ones")
-    
+
     elif backbone_name == "VGG16":
         layers = list(backbone.features.children())[:-2]  # Remove avg pooling and FC layer
         for layer in layers[:-5]:
             for p in layer.parameters():
                 p.requires_grad = False
         logging.debug("Train last layers of the VGG-16, freeze the previous ones")
-    
-    #UPGRADE: new models below
+
+    # UPGRADE: new models below
     # ViT architectures models, vit_b_16 or VIT_H_14 or vit_b_16
     elif backbone_name.startswith("vit"):
         layers = list(backbone.children())[:-2]

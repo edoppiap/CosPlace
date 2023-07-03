@@ -1,4 +1,3 @@
-import os
 import sys
 import torch
 import logging
@@ -7,8 +6,6 @@ from tqdm import tqdm
 import multiprocessing
 from datetime import datetime
 import torchvision.transforms as T
-from pytorch_metric_learning import distances, losses, miners, reducers, testers
-
 
 import test
 import util
@@ -16,9 +13,10 @@ import parser
 import commons
 import cosface_loss
 import augmentations
-from cosplace_model import cosplace_network
 from datasets.test_dataset import TestDataset
 from datasets.train_dataset import TrainDataset
+import test_geowarp
+from geowarp import FeatureExtractor, HomographyRegression, GeoWarp
 
 torch.backends.cudnn.benchmark = True  # Provides a speedup
 
@@ -31,46 +29,36 @@ logging.info(" ".join(sys.argv))
 logging.info(f"Arguments: {args}")
 logging.info(f"The outputs are being saved in {args.output_folder}")
 
-#### Model
-if args.domain_adapt == 'True':
-    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim,
-                                                alpha=0.05, domain_adapt="True")
-    logging.info(f"Using domain adaption")
-else:
-    model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
-    logging.info(f"Using domain adaption")
+import geowarp_dataset
 
-### convenient function from pytorch-metric-learning ###
-def get_all_embeddings(dataset, model):
-    tester = testers.BaseTester()
-    return tester.get_all_embeddings(dataset, model)
+# #### Model
+# if args.domain_adapt == 'True':
+#     model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim,
+#                                                 alpha=0.05, domain_adapt="True")
+#     logging.info(f"Using domain adaption")
+# else:
+#     model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
+#     logging.info(f"Using domain adaption")
+
+features_extractor = FeatureExtractor(args.backbone, args.fc_output_dim)
+global_features_dim = commons.get_output_dim(features_extractor, "gem")
 
 logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
 
 if args.resume_model is not None:
     logging.debug(f"Loading model from {args.resume_model}")
     model_state_dict = torch.load(args.resume_model)
-    model.load_state_dict(model_state_dict)
+    features_extractor.load_state_dict(model_state_dict)
+    del model_state_dict
 
-model = model.to(args.device).train()
+homography_regression = HomographyRegression(kernel_sizes=args.kernel_sizes, channels=args.channels, padding=1)
+model = GeoWarp(features_extractor, homography_regression).cuda().eval()
+model = torch.nn.DataParallel(model)
 
-### Loss 
-if args.loss == 'CrossEntropyLoss':
-    criterion = torch.nn.CrossEntropyLoss()
-elif args.loss == 'TripletMarginLoss':
-    criterion = losses.SelfSupervisedLoss(losses.TripletMarginLoss(margin=0.05))
-elif args.loss == 'VICRegLoss':
-    criterion = losses.VICRegLoss(invariance_lambda=25, 
-                                variance_mu=25, 
-                                covariance_v=1, 
-                                eps=1e-4)
-    
-    
-    
 #### Optimizer
-# 
-#UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
-
+criterion = torch.nn.CrossEntropyLoss()
+mse = torch.nn.MSELoss()
+# UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
 if args.optimizer == "Adam":
     model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 elif args.optimizer == "AdamW":
@@ -84,18 +72,21 @@ elif args.optimizer == "LBFGS":
 elif args.optimizer == "Adadelta":
     model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
 
+optim = torch.optim.Adam(homography_regression.parameters(), lr=args.lr)
+
 ### Scheduler
 if args.scheduler == 'StepLR':
     scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
 elif args.scheduler == 'ReduceLROnPlateau':
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min') 
-elif args.scheduler == 'CosineAnnealignLR':
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min')
+elif args.scheduler == 'CosineAnnealingLR':
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
+# Add more elif conditions for other schedulers you want to use
 elif args.scheduler == 'ExponentialLR':
     scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
 else:
-    scheduler = None
-    
+    print("Invalid scheduler choice")
+
 #### Datasets
 groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
                        current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]
@@ -105,6 +96,9 @@ classifiers = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) 
 # classifiers_optimizers = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
 classifiers_optimizers = [torch.optim.AdamW(classifier.parameters(), lr=args.classifiers_lr) for classifier in
                           classifiers]
+ss_dataset = [geowarp_dataset.HomographyDataset(args, args.train_set_folder, M=args.M, N=args.N, current_group=n,
+                                                min_images_per_class=args.min_images_per_class, k=args.k) for n in
+              range(args.groups_num)]  # k = parameter k, defining the difficulty of ss training data, default = 0.6
 
 logging.info(f"Using {len(groups)} groups")
 logging.info(f"The {len(groups)} groups have respectively the following number of classes {[len(g) for g in groups]}")
@@ -115,9 +109,9 @@ val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_
 test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
                       positive_dist_threshold=args.positive_dist_threshold)
 test_tokyo_night_ds = TestDataset("/content/data/tokyo_xs/night_database/", queries_folder="queries",
-                      positive_dist_threshold=args.positive_dist_threshold)
+                                  positive_dist_threshold=args.positive_dist_threshold)
 test_tokyo_day_ds = TestDataset("/content/data/tokyo_xs/day_database/", queries_folder="queries",
-                      positive_dist_threshold=args.positive_dist_threshold)
+                                positive_dist_threshold=args.positive_dist_threshold)
 logging.info(f"Validation set: {val_ds}")
 logging.info(f"Test set: {test_ds}")
 
@@ -196,17 +190,6 @@ if args.augmentation_device == "cuda":
     compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
 
     gpu_augmentation = T.Compose(compose)
-    if args.loss == "TripletMarginLoss" or args.loss == 'VICRegLoss':
-        compose2 = []
-        compose2.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
-                                                          scale=[1-.5, 1]))
-        compose2.append(augmentations.DeviceAgnosticRandomHorizontalFlip(.5))
-        compose2.append(T.RandomVerticalFlip(.5))
-        compose2.append(T.RandomErasing(0.5))
-        compose2.append(T.RandomPerspective(0.5))
-        compose2.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-        gpu_augmentation_2 = T.Compose(compose2)
-    
 
 if args.use_amp16:
     scaler = torch.cuda.amp.GradScaler()
@@ -242,10 +225,14 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         dataloader_night = commons.InfiniteDataLoader(groups_night[current_group_num], num_workers=args.num_workers,
                                                       batch_size=args.batch_size, shuffle=True,
                                                       pin_memory=(args.device == "cuda"), drop_last=True)
+        ss_dataloader = commons.InfiniteDataLoader(ss_dataset[current_group_num], num_workers=args.num_workers,
+                                                   batch_size=args.batch_size, shuffle=True,
+                                                   pin_memory=(args.device == "cuda"), drop_last=True)
 
         dataloader_iterator = iter(dataloader)
         dataloader_iterator_day = iter(dataloader_day)
         dataloader_iterator_night = iter(dataloader_night)
+        ss_iterator = iter(ss_dataloader)
 
         logging.info(f"Dataloader CLASSIC: {len(dataloader)}")
         logging.info(f"Dataloader DAY: {len(dataloader_day)}")
@@ -257,145 +244,101 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
         dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
                                                 batch_size=args.batch_size, shuffle=True,
                                                 pin_memory=(args.device == "cuda"), drop_last=True)
+        ss_dataloader = commons.InfiniteDataLoader(ss_dataset[current_group_num], num_workers=args.num_workers,
+                                                   batch_size=args.batch_size, shuffle=True,
+                                                   pin_memory=(args.device == "cuda"), drop_last=True)
         dataloader_iterator = iter(dataloader)
+        ss_iterator = iter(ss_dataloader)
 
     model = model.train()
     epoch_losses = np.zeros((0, 1), dtype=np.float32)
 
+    recalls = []  # Add this line to define the recalls variable
     for iteration in tqdm(range(args.iterations_per_epoch), ncols=100):
-        if args.domain_adapt == 'True':
-            images, targets, _ = next(dataloader_iterator)
-            images_day, targets_day, _ = next(dataloader_iterator_day)
-            images_night, targets_night, _ = next(dataloader_iterator_night)
+        images, targets, _ = next(dataloader_iterator)
+        images, targets = images.to(args.device), targets.to(args.device)
 
-            images, targets = images.to(args.device), targets.to(args.device)
-            images_day, targets_day = images_day.to(args.device), targets_day.to(args.device)
-            images_night, targets_night = images_night.to(args.device), targets_night.to(args.device)
+        if args.augmentation_device == "cuda":
+            images = gpu_augmentation(images)
 
-            if args.augmentation_device == "cuda":
-                images = gpu_augmentation(images)
-                images_day = gpu_augmentation(images_day)
-                images_night = gpu_augmentation(images_night)
-        else:
-            images, targets, _ = next(dataloader_iterator)
-            images, targets = images.to(args.device), targets.to(args.device)
+        # warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = to_cuda(next(ss_data_iter))
+        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = next(
+            ss_iterator)  # dal warping dataset prende le due immagini warped e i due punti delle intersezioni
+        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = warped_img_1.to(
+            args.device), warped_img_2.to(args.device), warped_intersection_points_1.to(
+            args.device), warped_intersection_points_2.to(args.device)  # warping dataset
 
-            if args.augmentation_device == "cuda":
-                images = gpu_augmentation(images)
-                if args.loss == 'TripletMarginLoss':
-                  augmented = gpu_augmentation_2(images)   
+        with torch.no_grad():
+            similarity_matrix_1to2, similarity_matrix_2to1 = model("similarity", [warped_img_1, warped_img_2])
 
-        model_optimizer.zero_grad()
+        optim.zero_grad()
+        model_optimizer.zero_grad()  # setta il gradiente a zero per evitare double counting (passaggio classico dopo ogni iterazione)
         classifiers_optimizers[current_group_num].zero_grad()
 
         if not args.use_amp16:
-            descriptors = model(images)
+            descriptors = model("features_extractor", [images, "global"])
             output = classifiers[current_group_num](descriptors, targets)
-            if args.loss == 'TripletMarginLoss':
-                augmented_descriptors = model(augmented)
-                augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
-                loss = criterion(descriptors, augmented_descriptors)
-            elif args.loss == 'VICRegLoss':
-                loss = criterion(output, ref_emb=None)
-            else:
-                loss = criterion(output, targets)
+            loss = criterion(output, targets)
             loss.backward()
-            epoch_losses = np.append(epoch_losses, loss.item())
-            del loss, output, images
-
-            if args.domain_adapt == 'True':
-                descriptors_day = model(images_day, alpha=0.05)
-                output_day = classifiers_day[current_group_num](descriptors_day, targets_day)
-                loss_day = criterion(output_day, targets_day)
-
-                descriptors_night = model(images_night, alpha=0.05)
-                output_night = classifiers_night[current_group_num](descriptors_night, targets_night)
-                loss_night = criterion(output_night, targets_night)
-
-                loss_domain = loss_night + loss_day
-                loss_domain.backward()
-
-                epoch_losses = np.append(epoch_losses, loss_day.item())
-                epoch_losses = np.append(epoch_losses, loss_night.item())
-                del loss_day, loss_night, output_day, output_night, images_day, images_night
-                classifiers_optimizers_day[current_group_num].step()
-                classifiers_optimizers_night[current_group_num].step()
-
+            loss = loss.item()
+            del output, images
+            # ss_loss
+            if args.ss_w != 0:
+                pred_warped_intersection_points_1 = model("regression", similarity_matrix_1to2)
+                pred_warped_intersection_points_2 = model("regression", similarity_matrix_2to1)
+                ss_loss = (mse(pred_warped_intersection_points_1[:, :4], warped_intersection_points_1) +
+                           mse(pred_warped_intersection_points_1[:, 4:], warped_intersection_points_2) +
+                           mse(pred_warped_intersection_points_2[:, :4], warped_intersection_points_2) +
+                           mse(pred_warped_intersection_points_2[:, 4:], warped_intersection_points_1))
+                # ss_loss = compute_loss(ss_loss, args.ss_w)
+                ss_loss.backward()
+                ss_loss = ss_loss.item()
+                del pred_warped_intersection_points_1, pred_warped_intersection_points_2
+            else:
+                ss_loss = 0
+            epoch_losses = np.append(epoch_losses, np.array([[loss, ss_loss]]))  # both losses
+            del loss, ss_loss
+            # step update
             model_optimizer.step()
             classifiers_optimizers[current_group_num].step()
-
+            optim.step()
         else:  # Use AMP 16
             with torch.cuda.amp.autocast():
-                descriptors = model(images)
+                descriptors = model("features_extractor", [images, "global"])
                 output = classifiers[current_group_num](descriptors, targets)
-                if args.loss == 'TripletMarginLoss':
-                    augmented_descriptors = model(augmented)
-                    augmented_output = classifiers[current_group_num](augmented_descriptors, targets)
-                    loss = criterion(descriptors, augmented_descriptors)
-                elif args.loss == 'VICRegLoss':
-                    loss = criterion(output, ref_emb=None)
-                else:
-                    loss = criterion(output, targets)
-
-                if args.domain_adapt == 'True':
-                    descriptors_day = model(images_day)
-                    output_day = classifiers_day[current_group_num](descriptors_day, targets_day)
-                    loss_day = criterion(output_day, targets_day)
-
-                    descriptors_night = model(images_night)
-                    output_night = classifiers_night[current_group_num](descriptors_night, targets_night)
-                    loss_night = criterion(output_night, targets_night)
-
-                    loss_domain = loss_night + loss_day
-
+                loss = criterion(output, targets)
             scaler.scale(loss).backward()
             epoch_losses = np.append(epoch_losses, loss.item())
             del loss, output, images
-
-            if args.domain_adapt == 'True':
-                scaler.scale(loss_day).backward()
-                scaler.scale(loss_night).backward()
-
-                epoch_losses = np.append(epoch_losses, loss_day.item())
-                epoch_losses = np.append(epoch_losses, loss_night.item())
-                del loss_day, loss_night, output_day, output_night, images_day, images_night
-                scaler.step(classifiers_optimizers_day[current_group_num])
-                scaler.step(classifiers_optimizers_night[current_group_num])
-
             scaler.step(model_optimizer)
             scaler.step(classifiers_optimizers[current_group_num])
-            scale = scaler.get_scale()
             scaler.update()
 
+            # remember to concatenate both losses
+            epoch_losses = np.concatenate((epoch_losses, np.array([[loss, ss_loss]])))  # both losses
+            del loss, ss_loss
     classifiers[current_group_num] = classifiers[current_group_num].cpu()
     util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
-    
     logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
                   f"loss = {epoch_losses.mean():.4f}")
-    if scheduler is not None:
-        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-            scheduler.step(epoch_losses.mean())
-        else:
-            scheduler.step()
-    
 
-    #### Evaluation
-    recalls, recalls_str = test.test(args, val_ds, model)
+    ### Evaluation (still in the for - delete the ())
+    recalls, recalls_str, _ = test_geowarp.use_geowarp(args, val_ds, model)
     logging.info(
         f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, {val_ds}: {recalls_str[:20]}")
     is_best = recalls[0] > best_val_recall1
     best_val_recall1 = max(recalls[0], best_val_recall1)
-
     # Save checkpoint, which contains all training parameters
-    checkpoint = {
+    util.save_checkpoint({
         "epoch_num": epoch_num + 1,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": model_optimizer.state_dict(),
         "classifiers_state_dict": [c.state_dict() for c in classifiers],
         "optimizers_state_dict": [c.state_dict() for c in classifiers_optimizers],
         "best_val_recall1": best_val_recall1
-    }
-    util.save_checkpoint(checkpoint, is_best, args.output_folder)
+    }, is_best, args.output_folder)
+    #### end of evaluation
+    ### end of training.
 
 logging.info(f"Trained for {epoch_num + 1:02d} epochs, in total in {str(datetime.now() - start_time)[:-7]}")
 
@@ -404,16 +347,16 @@ best_model_state_dict = torch.load(f"{args.output_folder}/best_model.pth")
 model.load_state_dict(best_model_state_dict)
 
 logging.info(f"Now testing on the test set: {test_ds}")
-recalls, recalls_str = test.test(args, test_ds, model, args.num_preds_to_save)
+recalls, recalls_str = test_geowarp.test(args, test_tokyo_night_ds, model, args.num_preds_to_save)
 logging.info(f"{test_ds}: {recalls_str}")
 
 # Testing on both Tokyo Night and Tokyo Day
 logging.info(f"Now testing on the Tokyo set night: {test_tokyo_night_ds}")
-recalls, recalls_str = test.test(args, test_tokyo_night_ds, model, args.num_preds_to_save)
+recalls, recalls_str = test_geowarp.test(args, test_tokyo_night_ds, model, args.num_preds_to_save)
 logging.info(f"{test_tokyo_night_ds}: {recalls_str}")
 
 logging.info(f"Now testing on the Tokyo set day: {test_tokyo_day_ds}")
-recalls, recalls_str = test.test(args, test_tokyo_day_ds, model, args.num_preds_to_save)
+recalls, recalls_str = test_geowarp.test(args, test_tokyo_night_ds, model, args.num_preds_to_save)
 logging.info(f"{test_tokyo_day_ds}: {recalls_str}")
 
 logging.info("Experiment finished (without any errors)")
