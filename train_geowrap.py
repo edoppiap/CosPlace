@@ -53,7 +53,6 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=int, default=30, help="_")
     parser.add_argument("--N", type=int, default=5, help="_")
     parser.add_argument("--L", type=int, default=2, help="_")
-    parser.add_argument("--groups_num", type=int, default=8, help="_")
     parser.add_argument("--min_images_per_class", type=int, default=10, help="_")
     # Training parameters
     parser.add_argument("--lr", type=float, default=0.0001,
