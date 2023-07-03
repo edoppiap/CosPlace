@@ -148,7 +148,7 @@ if __name__ == "__main__":
                                                        positive_dist_threshold=args.positive_dist_threshold)
     logging.info(f"Geoloc test set: {geoloc_test_dataset}")
 
-    ss_dataset = geowarp_dataset.HomographyDataset(root_path=f"{args.datasets_folder}/{args.dataset_name}/images/train",
+    ss_dataset = geowarp_dataset.HomographyDataset(root_path=f"{args.datasets_folder}/{args.dataset_name}/train",
                                                 k=args.k)
     ss_dataloader = commons.InfiniteDataLoader(ss_dataset, shuffle=True, batch_size=args.batch_size_ss,
                                                num_workers=args.ss_num_workers, pin_memory=True, drop_last=True)
