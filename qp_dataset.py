@@ -1,7 +1,7 @@
 import torch
 
 import util
-import datasets_util
+import geowarp_dataset_util
 
 
 class DatasetQP(torch.nn.Module):
@@ -43,8 +43,8 @@ class DatasetQP(torch.nn.Module):
 
     def __getitem__(self, index):
         query_path, positive_path, _ = self.query_positive_distances[index]
-        query = datasets_util.open_image_and_apply_transform(query_path)
-        positive = datasets_util.open_image_and_apply_transform(positive_path)
+        query = geowarp_dataset_util.open_image_and_apply_transform(query_path)
+        positive = geowarp_dataset_util.open_image_and_apply_transform(positive_path)
         return query, positive
 
     def __len__(self):

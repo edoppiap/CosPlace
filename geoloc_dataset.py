@@ -5,7 +5,7 @@ from os.path import join
 import torch.utils.data as data
 from sklearn.neighbors import NearestNeighbors
 
-import datasets_util
+import geowarp_dataset_util
 
 
 class GeolocDataset(data.Dataset):
@@ -60,7 +60,7 @@ class GeolocDataset(data.Dataset):
 
     def __getitem__(self, index):
         image_path = self.images_paths[index]
-        img = datasets_util.open_image_and_apply_transform(image_path)
+        img = geowarp_dataset_util.open_image_and_apply_transform(image_path)
         return img, index
 
     def __len__(self):
