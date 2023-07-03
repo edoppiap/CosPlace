@@ -3,6 +3,8 @@ import logging
 import torchvision
 from torch import nn
 from torch.autograd import Function
+import os
+from os.path import join
 from typing import Tuple
 
 from cosplace_model.layers import Flatten, L2Norm, GeM
