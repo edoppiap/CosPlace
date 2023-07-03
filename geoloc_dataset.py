@@ -20,19 +20,19 @@ class GeolocDataset(data.Dataset):
         positive_dist_threshold : int, the threshold for positives (in meters).
 
         The images should be located at these two locations:
-            {datasets_folder}/{dataset_name}/images/{split}/gallery/*.jpg
+            {datasets_folder}/{dataset_name}/images/{split}/database/*.jpg
             {datasets_folder}/{dataset_name}/images/{split}/queries/*.jpg
 
         """
 
         super().__init__()
         self.dataset_name = dataset_name
-        self.dataset_folder = join(datasets_folder, dataset_name, "images", split)
+        self.dataset_folder = join(datasets_folder, dataset_name, split)
         if not os.path.exists(self.dataset_folder):
             raise FileNotFoundError(f"Folder {self.dataset_folder} does not exist")
 
         #### Read paths and UTM coordinates for all images.
-        gallery_folder = join(self.dataset_folder, "gallery")
+        gallery_folder = join(self.dataset_folder, "database")
         queries_folder = join(self.dataset_folder, "queries")
         if not os.path.exists(gallery_folder):
             raise FileNotFoundError(f"Folder {gallery_folder} does not exist")
@@ -67,7 +67,7 @@ class GeolocDataset(data.Dataset):
         return len(self.images_paths)
 
     def __repr__(self):
-        return f"< {self.__class__.__name__}, {self.dataset_name} - #gallery: {self.gallery_num}; #queries: {self.queries_num} >"
+        return f"< {self.__class__.__name__}, {self.dataset_name} - #database: {self.gallery_num}; #queries: {self.queries_num} >"
 
     def get_positives(self):
         return self.soft_positives_per_query
