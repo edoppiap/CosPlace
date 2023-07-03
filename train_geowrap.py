@@ -2,7 +2,7 @@ import os
 import sys
 import torch
 import logging
-import argparse
+import parser
 import numpy as np
 from tqdm import tqdm
 from datetime import datetime
@@ -45,114 +45,9 @@ def compute_loss(loss, weight):
     loss.backward()
     return loss.item()
 
+    torch.backends.cudnn.benchmark = True  # Provides a speedup
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    # CosPlace Groups parameters
-    parser.add_argument("--M", type=int, default=10, help="_")
-    parser.add_argument("--alpha", type=int, default=30, help="_")
-    parser.add_argument("--N", type=int, default=5, help="_")
-    parser.add_argument("--L", type=int, default=2, help="_")
-    parser.add_argument("--min_images_per_class", type=int, default=10, help="_")
-    # Training parameters
-    parser.add_argument("--lr", type=float, default=0.0001,
-                        help="learning rate")
-    parser.add_argument("--optim", type=str, default="sgd",
-                        choices=["adam", "sgd"],
-                        help="optimizer")
-    parser.add_argument("--n_epochs", type=int, default=100,
-                        help="epochs")
-    parser.add_argument("--iterations_per_epoch", type=int, default=500,
-                        help="how many iterations each epoch should last")
-    parser.add_argument("--k", type=int, default=0.6,
-                        help="parameter k, defining the difficulty of ss training data")
-    parser.add_argument("--ss_w", type=float, default=1,
-                        help="weight of self-supervised loss")
-    parser.add_argument("--consistency_w", type=float, default=0.1,
-                        help="weight of consistency loss")
-    parser.add_argument("--features_wise_w", type=float, default=10,
-                        help="weight of features-wise loss")
-    parser.add_argument("--qp_threshold", type=float, default=1.2,
-                        help="Threshold distance (in features space) for query-positive pairs")
-    parser.add_argument("--batch_size_ss", type=int, default=16,
-                        help="batch size for self-supervised loss")
-    parser.add_argument("--batch_size_consistency", type=int, default=16,
-                        help="batch size for consistency loss")
-    parser.add_argument("--batch_size_features_wise", type=int, default=16,
-                        help="batch size for features-wise loss")
-    parser.add_argument("--ss_num_workers", type=int, default=8,
-                        help="num_workers for self-supervised loss")
-    parser.add_argument("--qp_num_workers", type=int, default=4,
-                        help="num_workers for weakly supervised losses")
-    parser.add_argument("--groups_num", type=int, default=8, help="_")
-    parser.add_argument("--dataset_folder", type=str, default=None,
-                        help="path of the folder with train/val/test sets")
-
-    # Test parameters
-    parser.add_argument("--num_reranked_preds", type=int, default=5,
-                        help="number of predictions to re-rank at test time")
-
-    # Model parameters
-    parser.add_argument("--arch", type=str, default="resnet50",
-                        choices=["alexnet", "vgg16", "resnet50"],
-                        help="model to use for the encoder")
-    parser.add_argument("--pooling", type=str, default="netvlad",
-                        choices=["netvlad", "gem"],
-                        help="pooling layer used in the baselines")
-    parser.add_argument("--kernel_sizes", nargs='+', default=[7, 5, 5, 5, 5, 5],
-                        help="size of kernels in conv layers of Homography Regression")
-    parser.add_argument("--channels", nargs='+', default=[225, 128, 128, 64, 64, 64, 64],
-                        help="num channels in conv layers of Homography Regression")
-
-    # Others
-    parser.add_argument("--exp_name", type=str, default="default",
-                        help="name of generated folders with logs and checkpoints")
-    parser.add_argument("--resume_fe", type=str, default=None,
-                        help="path to resume for Feature Extractor")
-    parser.add_argument("--positive_dist_threshold", type=int, default=25,
-                        help="treshold distance for positives (in meters)")
-    parser.add_argument("--datasets_folder", type=str, default="../datasets",
-                        help="path with the datasets")
-    parser.add_argument("--dataset_name", type=str, default="pitts30k",
-                        help="name of folder with dataset")
-
-
-    args = parser.parse_args()
-
-    if args.dataset_folder is None:
-        try:
-            args.dataset_folder = os.environ['SF_XL_PROCESSED_FOLDER']
-        except KeyError:
-            raise Exception("You should set parameter --dataset_folder or export " +
-                            "the SF_XL_PROCESSED_FOLDER environment variable as such \n" +
-                            "export SF_XL_PROCESSED_FOLDER=/path/to/sf_xl/processed")
-
-    if not os.path.exists(args.dataset_folder):
-        raise FileNotFoundError(f"Folder {args.dataset_folder} does not exist")
-
-    args.train_set_folder = os.path.join(args.dataset_folder, "train")
-    if not os.path.exists(args.train_set_folder):
-        raise FileNotFoundError(f"Folder {args.train_set_folder} does not exist")
-
-    args.val_set_folder = os.path.join(args.dataset_folder, "val")
-    if not os.path.exists(args.val_set_folder):
-         raise FileNotFoundError(f"Folder {args.val_set_folder} does not exist")
-
-    args.test_set_folder = os.path.join(args.dataset_folder, "test")
-    if not os.path.exists(args.test_set_folder):
-        raise FileNotFoundError(f"Folder {args.test_set_folder} does not exist")
-
-    # Sanity check
-    if len(args.kernel_sizes) != len(args.channels) - 1:
-        raise ValueError("len(kernel_sizes) must be equal to len(channels)-1; "
-                         f"but you set them to {args.kernel_sizes} and {args.channels}")
-
-    # Setup
-    output_folder = f"runs/{args.exp_name}/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-    commons.setup_logging(output_folder)
-    logging.info("python " + " ".join(sys.argv))
-    logging.info(f"Arguments: {args}")
-    logging.info(f"The outputs are being saved in {output_folder}")
+    args = parser.parse_arguments()
     os.makedirs(f"{output_folder}/checkpoints")
     start_time = datetime.now()
 

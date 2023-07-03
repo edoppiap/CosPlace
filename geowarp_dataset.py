@@ -3,6 +3,8 @@ import kornia
 import random
 from glob import glob
 from shapely.geometry import Polygon
+import os
+import torchvision.transforms as T
 
 import geowarp_dataset_util
 
@@ -139,16 +141,37 @@ def get_random_homographic_pair(source_img, k, is_debugging=False):
 
 
 class HomographyDataset(torch.utils.data.Dataset):
-    def __init__(self, root_path, k=0.1, is_debugging=False):
+    def __init__(self, args, dataset_folder, M=10, N=5, current_group=0, min_images_per_class=10, k=0.1,
+                 is_debugging=False):
         super().__init__()
-        self.images_paths = sorted(glob(f"{root_path}/**/*.jpg", recursive=True))
+        self.M = M
+        self.N = N
+        self.current_group = current_group
+        self.dataset_folder = dataset_folder
+        self.augmentation_device = args.augmentation_device
         self.k = k
         self.is_debugging = is_debugging
 
-    def __getitem__(self, index):
-        image_path = self.images_paths[index]
-        source_img = geowarp_dataset_util.open_image_and_apply_transform(image_path)
-        return get_random_homographic_pair(source_img, self.k, is_debugging=self.is_debugging)
+        # dataset_name should be either "processed", "small" or "raw", if you're using SF-XL
+        dataset_name = os.path.basename(args.dataset_folder)
 
-    def __len__(self):
-        return len(self.images_paths)
+        filename = f"cache/{dataset_name}_M{M}_N{N}_mipc{min_images_per_class}.torch"
+
+        classes_per_group, self.images_per_class = torch.load(filename)
+
+        self.classes_ids = classes_per_group[current_group]
+
+        if self.augmentation_device == "cpu":
+            self.transform = T.Compose([
+                T.ColorJitter(brightness=args.brightness,
+                              contrast=args.contrast,
+                              saturation=args.saturation,
+                              hue=args.hue),
+                T.RandomResizedCrop([512, 512], scale=[1 - args.random_resized_crop, 1]),
+                T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+
+        self.base_transform = T.Compose([
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
