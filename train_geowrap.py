@@ -14,7 +14,6 @@ import geowarp
 import commons
 import qp_dataset  # Used for weakly supervised losses, it yields query-positive pairs
 import geowarp_dataset  # Used to train the warping regressiong module in a self-supervised fashion
-import geoloc_dataset  # Used for testing
 
 from datasets.test_dataset import TestDataset
 from datasets.train_dataset import TrainDataset
