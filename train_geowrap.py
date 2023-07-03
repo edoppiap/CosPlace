@@ -16,6 +16,8 @@ import qp_dataset  # Used for weakly supervised losses, it yields query-positive
 import geowarp_dataset  # Used to train the warping regressiong module in a self-supervised fashion
 import geoloc_dataset  # Used for testing
 
+from datasets.test_dataset import TestDataset
+from datasets.train_dataset import TrainDataset
 
 def hor_flip(points):
     """Flip points horizontally.
@@ -141,12 +143,18 @@ if __name__ == "__main__":
     ############### MODEL ###############
 
     ############### DATASETS & DATALOADERS ###############
-    geoloc_train_dataset = geoloc_dataset.GeolocDataset(args.datasets_folder, args.dataset_name, split="train",
-                                                        positive_dist_threshold=args.positive_dist_threshold)
-    logging.info(f"Geoloc train set: {geoloc_train_dataset}")
-    geoloc_test_dataset = geoloc_dataset.GeolocDataset(args.datasets_folder, args.dataset_name, split="test",
-                                                       positive_dist_threshold=args.positive_dist_threshold)
-    logging.info(f"Geoloc test set: {geoloc_test_dataset}")
+    groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
+                           current_group=n, min_images_per_class=args.min_images_per_class) for n in
+              range(args.groups_num)]  # same as cos/arc/sphere face
+    # ss_dataset = dataset_warp.HomographyDataset(root_path=f"{args.datasets_folder}/{args.dataset_name}/images/train", k=args.k) -> original
+    ss_dataset = [geowarp_dataset.HomographyDataset(args, args.train_set_folder, M=args.M, N=args.N, current_group=n,
+                                                 min_images_per_class=args.min_images_per_class, k=args.k) for n in range(args.groups_num)]  # k = parameter k, defining the difficulty of ss training data, default = 0.6
+
+    val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_dist_threshold, args=args)
+    test_ds = TestDataset(args.test_set_folder, queries_folder="queries_v1",
+                          positive_dist_threshold=args.positive_dist_threshold, args=args)
+    logging.info(f"Validation set: {val_ds}")
+    logging.info(f"Test set: {test_ds}")
 
     ss_dataset = geowarp_dataset.HomographyDataset(root_path=f"{args.datasets_folder}/{args.dataset_name}/train",
                                                 k=args.k)
@@ -155,7 +163,7 @@ if __name__ == "__main__":
     ss_data_iter = iter(ss_dataloader)
 
     if args.consistency_w != 0 or args.features_wise_w != 0:
-        dataset_qp = qp_dataset.DatasetQP(model, global_features_dim, geoloc_train_dataset,
+        dataset_qp = qp_dataset.DatasetQP(model, global_features_dim, groups,
                                           qp_threshold=args.qp_threshold)
         dataloader_qp = commons.InfiniteDataLoader(dataset_qp, shuffle=True,
                                                    batch_size=max(args.batch_size_consistency,
@@ -270,9 +278,9 @@ if __name__ == "__main__":
     homography_regression = homography_regression.eval()
 
     test_baseline_recalls, test_baseline_recalls_pretty_str, test_baseline_predictions, _, _ = \
-        util.compute_features(geoloc_test_dataset, model, global_features_dim)
+        util.compute_features(groups, model, global_features_dim)
     logging.info(f"baseline test: {test_baseline_recalls_pretty_str}")
-    _, reranked_test_recalls_pretty_str = test.test(model, test_baseline_predictions, geoloc_test_dataset,
+    _, reranked_test_recalls_pretty_str = test.test(model, test_baseline_predictions, groups,
                                                     num_reranked_predictions=args.num_reranked_preds,
                                                     recall_values=[1, 5, 10, 20])
     logging.info(f"test after warping - {reranked_test_recalls_pretty_str}")
