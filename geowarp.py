@@ -1,103 +1,41 @@
-"""
-This file contains some functions adapted from the following repositories:
-    https://github.com/ignacio-rocco/cnngeometric_pytorch
-    for the main architecture;
-
-    https://github.com/filipradenovic/cnnimageretrieval-pytorch
-    for the GeM layer;
-
-    https://github.com/lyakaap/NetVLAD-pytorch
-    for the NetVLAD layer.
-"""
-
+# GeoWarp
+# GEO WARP -> Code from https://github.com/gmberton/geo_warp
+##### GEOWARP network
+from torch import nn
 import torch
-import torchvision
-import torch.nn as nn
+from cosplace_model.cosplace_network import get_backbone
+from cosplace_model.layers import L2Norm, GeM, Flatten, feature_L2_norm
 import torch.nn.functional as F
-from torch.nn.parameter import Parameter
-
-import commons
 
 
-class GeM(nn.Module):
-    def __init__(self, p=3, eps=1e-6):
+class FeatureExtractor(nn.Module):
+    def __init__(self, backbone, fc_output_dim):
         super().__init__()
-        self.p = Parameter(torch.ones(1) * p)
-        self.eps = eps
-
-    def forward(self, x):
-        B, C, H, W = x.shape
-        x = gem(x, p=self.p, eps=self.eps)
-        x = x.reshape(B, C)
-        return x
-
-
-def gem(x, p=3, eps=1e-6):
-    return F.avg_pool2d(x.clamp(min=eps).pow(p), (x.size(-2), x.size(-1))).pow(1. / p)
-
-
-class L2Norm(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return feature_L2_norm(x)
-
-
-def feature_L2_norm(feature):
-    epsilon = 1e-6
-    norm = torch.pow(torch.sum(torch.pow(feature, 2), 1) + epsilon, 0.5).unsqueeze(1).expand_as(feature)
-    return torch.div(feature.contiguous(), norm)
-
-
-class FeaturesExtractor(torch.nn.Module):
-    """The FeaturesExtractor is composed of two parts: the backbone encoder and the
-    pooling/aggregation layer.
-    The pooling/aggregation layer is used only to compute global features.
-    """
-
-    def __init__(self, arch, pooling):
-        super().__init__()
-        if arch == "resnet50":
-            model = torchvision.models.resnet50(pretrained=True)
-            layers = list(model.children())[:-3]
-        elif arch == "vgg16":
-            model = torchvision.models.vgg16(pretrained=True)
-            layers = list(model.features.children())[:-2]
-        elif arch == "alexnet":
-            model = torchvision.models.alexnet(pretrained=True)
-            layers = list(model.features.children())[:-2]
-        self.encoder = torch.nn.Sequential(*layers)
-
+        self.backbone, features_dim = get_backbone(backbone)
+        self.aggregation = nn.Sequential(
+            L2Norm(),
+            GeM(),
+            Flatten(),
+            nn.Linear(features_dim, fc_output_dim),
+            L2Norm()
+        )
         self.avgpool = nn.AdaptiveAvgPool2d((15, 15))
         self.l2norm = L2Norm()
-        if pooling == "netvlad":
-            encoder_dim = commons.get_output_dim(self.encoder)
-            self.pool = NetVLAD(dim=encoder_dim)
-        elif pooling == "gem":
-            self.pool = nn.Sequential(L2Norm(), GeM())
 
     def forward(self, x, f_type="local"):
-        x = self.encoder(x)
+        x = self.backbone(x)
         if f_type == "local":
             x = self.avgpool(x)
-            return self.l2norm(x)
+            x = self.l2norm(x)
+            return x
         elif f_type == "global":
-            return self.pool(x)
+            x = self.aggregation(x)
+            return x
         else:
             raise ValueError(f"Invalid features type: {f_type}")
 
 
-def compute_similarity(features_a, features_b):
-    b, c, h, w = features_a.shape
-    features_a = features_a.transpose(2, 3).contiguous().view(b, c, h * w)
-    features_b = features_b.view(b, c, h * w).transpose(1, 2)
-    features_mul = torch.bmm(features_b, features_a)
-    correlation_tensor = features_mul.view(b, h, w, h * w).transpose(2, 3).transpose(1, 2)
-    correlation_tensor = feature_L2_norm(F.relu(correlation_tensor))
-    return correlation_tensor
-
-
+##### MODULE FOR GEOWARP
 class HomographyRegression(nn.Module):
     def __init__(self, output_dim=16, kernel_sizes=[7, 5], channels=[225, 128, 64], padding=0):
         super().__init__()
@@ -124,10 +62,12 @@ class HomographyRegression(nn.Module):
         x = self.conv(x)
         x = x.contiguous().view(x.size(0), -1)
         x = self.linear(x)
+        x = x.reshape(B, 8, 2)
         return x.reshape(B, 8, 2)
 
 
-class Network(nn.Module):
+##### MODULE GEOWARP
+class GeoWarp(nn.Module):
     """
     Overview of the network:
     name                 input                                       output
@@ -154,7 +94,7 @@ class Network(nn.Module):
 
         """
         assert operation in ["features_extractor", "similarity", "regression", "similarity_and_regression"]
-        if operation == "features_extractor":
+        if operation == "features_extractor":  # Encoder
             if len(args) == 2:
                 tensor_images, features_type = args
                 return self.features_extractor(tensor_images, features_type)
@@ -186,33 +126,11 @@ class Network(nn.Module):
         return self.homography_regression(similarity_matrix)
 
 
-class NetVLAD(nn.Module):
-    def __init__(self, num_clusters=64, dim=256, normalize_input=True):
-        super().__init__()
-        self.num_clusters = num_clusters
-        self.dim = dim
-        self.normalize_input = normalize_input
-        self.conv = nn.Conv2d(dim, num_clusters, kernel_size=(1, 1), bias=False)
-        self.centroids = nn.Parameter(torch.rand(num_clusters, dim))
-
-    def __forward_vlad__(self, x_flatten, soft_assign, N, D):
-        vlad = torch.zeros([N, self.num_clusters, D], dtype=x_flatten.dtype, device=x_flatten.device)
-        for D in range(self.num_clusters):  # Slower than non-looped, but lower memory usage
-            residual = x_flatten.unsqueeze(0).permute(1, 0, 2, 3) - \
-                       self.centroids[D:D + 1, :].expand(x_flatten.size(-1), -1, -1).permute(1, 2, 0).unsqueeze(0)
-            residual = residual * soft_assign[:, D:D + 1, :].unsqueeze(2)
-            vlad[:, D:D + 1, :] = residual.sum(dim=-1)
-        vlad = F.normalize(vlad, p=2, dim=2)
-        vlad = vlad.view(N, -1)
-        vlad = F.normalize(vlad, p=2, dim=1)
-        return vlad
-
-    def forward(self, x):
-        N, D, H, W = x.shape[:]
-        if self.normalize_input:
-            x = F.normalize(x, p=2, dim=1)
-        x_flatten = x.view(N, D, -1)
-        soft_assign = self.conv(x).view(N, self.num_clusters, -1)
-        soft_assign = F.softmax(soft_assign, dim=1)
-        vlad = self.__forward_vlad__(x_flatten, soft_assign, N, D)
-        return vlad
+def compute_similarity(features_a, features_b):
+    b, c, h, w = features_a.shape
+    features_a = features_a.transpose(2, 3).contiguous().view(b, c, h * w)
+    features_b = features_b.view(b, c, h * w).transpose(1, 2)
+    features_mul = torch.bmm(features_b, features_a)
+    correlation_tensor = features_mul.view(b, h, w, h * w).transpose(2, 3).transpose(1, 2)
+    correlation_tensor = feature_L2_norm(F.relu(correlation_tensor))
+    return correlation_tensor
