@@ -1,74 +1,61 @@
-
-import faiss
 import torch
-import logging
 import numpy as np
 from tqdm import tqdm
-from typing import Tuple
-from argparse import Namespace
-from torch.utils.data.dataset import Subset
-from torch.utils.data import DataLoader, Dataset
 
-import visualizations
+import util
+import geowarp_dataset
+import geowarp_dataset_util
 
 
-# Compute R@1, R@5, R@10, R@20
-RECALL_VALUES = [1, 5, 10, 20]
+def test(model, predictions, test_dataset, num_reranked_predictions=5,
+         recall_values=[1, 5, 10, 20], test_batch_size=8):
+    """Compute the test by warping the query-prediction pairs.
 
+    Parameters
+    ----------
+    model : network.Network
+    predictions : np.array of int, containing the first 20 predictions for each query,
+        with shape [queries_num, 20].
+    test_dataset : dataset_geoloc.GeolocDataset, which contains the test-time images (queries and gallery).
+    num_reranked_predictions : int, how many predictions to re-rank.
+    recall_values : list of int, recalls to compute (e.g. R@1, R@5...).
+    test_batch_size : int.
 
-def test(args: Namespace, eval_ds: Dataset, model: torch.nn.Module,
-         num_preds_to_save: int = 0) -> Tuple[np.ndarray, str]:
-    """Compute descriptors of the given dataset and compute the recalls."""
-    
+    Returns
+    -------
+    recalls : np.array of int, containing R@1, R@5, r@10, r@20.
+    recalls_pretty_str : str, pretty-printed recalls
+    """
+
     model = model.eval()
+    reranked_predictions = predictions.copy()
     with torch.no_grad():
-        logging.debug("Extracting database descriptors for evaluation/testing")
-        database_subset_ds = Subset(eval_ds, list(range(eval_ds.database_num)))
-        database_dataloader = DataLoader(dataset=database_subset_ds, num_workers=args.num_workers,
-                                         batch_size=args.infer_batch_size, pin_memory=(args.device == "cuda"))
-        all_descriptors = np.empty((len(eval_ds), args.fc_output_dim), dtype="float32")
-        for images, indices in tqdm(database_dataloader, ncols=100):
-            descriptors = model(images.to(args.device))
-            descriptors = descriptors.cpu().numpy()
-            all_descriptors[indices.numpy(), :] = descriptors
-        
-        logging.debug("Extracting queries descriptors for evaluation/testing using batch size 1")
-        queries_infer_batch_size = 1
-        queries_subset_ds = Subset(eval_ds, list(range(eval_ds.database_num, eval_ds.database_num+eval_ds.queries_num)))
-        queries_dataloader = DataLoader(dataset=queries_subset_ds, num_workers=args.num_workers,
-                                        batch_size=queries_infer_batch_size, pin_memory=(args.device == "cuda"))
-        for images, indices in tqdm(queries_dataloader, ncols=100):
-            descriptors = model(images.to(args.device))
-            descriptors = descriptors.cpu().numpy()
-            all_descriptors[indices.numpy(), :] = descriptors
-    
-    queries_descriptors = all_descriptors[eval_ds.database_num:]
-    database_descriptors = all_descriptors[:eval_ds.database_num]
-    
-    # Use a kNN to find predictions
-    faiss_index = faiss.IndexFlatL2(args.fc_output_dim)
-    faiss_index.add(database_descriptors)
-    del database_descriptors, all_descriptors
-    
-    logging.debug("Calculating recalls")
-    _, predictions = faiss_index.search(queries_descriptors, max(RECALL_VALUES))
-    
-    #### For each query, check if the predictions are correct
-    positives_per_query = eval_ds.get_positives()
-    recalls = np.zeros(len(RECALL_VALUES))
-    for query_index, preds in enumerate(predictions):
-        for i, n in enumerate(RECALL_VALUES):
-            if np.any(np.in1d(preds[:n], positives_per_query[query_index])):
-                recalls[i:] += 1
-                break
-    
-    # Divide by queries_num and multiply by 100, so the recalls are in percentages
-    recalls = recalls / eval_ds.queries_num * 100
-    recalls_str = ", ".join([f"R@{val}: {rec:.1f}" for val, rec in zip(RECALL_VALUES, recalls)])
-    
-    # Save visualizations of predictions
-    if num_preds_to_save != 0:
-        # For each query save num_preds_to_save predictions
-        visualizations.save_preds(predictions[:, :num_preds_to_save], eval_ds, args.output_folder, args.save_only_wrong_preds)
-    
-    return recalls, recalls_str
+        for num_q in tqdm(range(test_dataset.queries_num), desc="Testing", ncols=100):
+            dot_prods_wqp = np.zeros((num_reranked_predictions))
+            query_path = test_dataset.queries_paths[num_q]
+            for i1 in range(0, num_reranked_predictions, test_batch_size):
+                batch_indexes = list(range(num_reranked_predictions))[i1:i1 + test_batch_size]
+                current_batch_size = len(batch_indexes)
+                query = geowarp_dataset_util.open_image_and_apply_transform(query_path)
+                query_repeated_twice = torch.repeat_interleave(query.unsqueeze(0), current_batch_size, 0)
+
+                preds = []
+                for i in batch_indexes:
+                    pred_path = test_dataset.gallery_paths[predictions[num_q, i]]
+                    preds.append(geowarp_dataset_util.open_image_and_apply_transform(pred_path))
+                preds = torch.stack(preds)
+
+                warped_pair = geowarp_dataset.compute_warping(model, query_repeated_twice.cuda(), preds.cuda())
+                q_features = model("features_extractor", [warped_pair[0], "local"])
+                p_features = model("features_extractor", [warped_pair[1], "local"])
+                # Sum along all axes except for B. wqp stands for warped query-prediction
+                dot_prod_wqp = (q_features * p_features).sum(list(range(1, len(p_features.shape)))).cpu().numpy()
+
+                dot_prods_wqp[i1:i1 + test_batch_size] = dot_prod_wqp
+
+            reranking_indexes = dot_prods_wqp.argsort()[::-1]
+            reranked_predictions[num_q, :num_reranked_predictions] = predictions[num_q][reranking_indexes]
+
+    ground_truths = test_dataset.get_positives()
+    recalls, recalls_pretty_str = util.compute_recalls(reranked_predictions, ground_truths, test_dataset, recall_values)
+    return recalls, recalls_pretty_str
