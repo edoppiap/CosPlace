@@ -28,6 +28,8 @@ def parse_arguments(is_training: bool = True):
     parser.add_argument('--scheduler', type=str, default='none',
                         choices=["StepLR", "ReduceLROnPlateau", "CosineAnnealignLR", "ExponentialLR"],
                         help='scheduler to use')
+    parser.add_argument("--loss_function", type=str, help="choose the loss function [cosface]",
+                        default="cosface"),
     # Training parameters
     parser.add_argument("--use_amp16", action="store_true",
                         help="use Automatic Mixed Precision")
