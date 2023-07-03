@@ -54,8 +54,6 @@ CHANNELS_NUM_IN_LAST_CONV = {
     "efficientnet_b0": 1280,
     "efficientnet_b1": 1280,
     "efficientnet_b2": 1408,
-    "mobilenet_v3_small": 576,
-    "mobilenet_v3_large": 960,
 }
 
 
