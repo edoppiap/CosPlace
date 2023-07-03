@@ -106,7 +106,7 @@ class GeoLocalizationNet(nn.Module):
         
 def get_pretrained_places_torchvision_model(backbone_name: str) -> torch.nn.Module:
     model_name = ''
-    if backbone_name.startswith("resnet18"):
+    if backbone_name.startswith("ResNet18"):
         model_name = "resnet18_places"
         model = torchvision.models.resnet18(num_classes=365)
     elif backbone_name == "VGG16":
