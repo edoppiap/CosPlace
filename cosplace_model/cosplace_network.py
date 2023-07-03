@@ -108,10 +108,10 @@ def get_pretrained_places_torchvision_model(backbone_name: str) -> torch.nn.Modu
     model_name = ''
     if backbone_name.startswith("ResNet18"):
         model_name = "resnet18_places"
-        model = torchvision.models.resnet18(num_classes=365, pretrained=False)
+        model = torchvision.models.resnet18(num_classes=365, weights=None)
     elif backbone_name == "VGG16":
         model_name = "vgg16_places"
-        model = torchvision.models.vgg16(num_classes = 365, pretrained=False)
+        model = torchvision.models.vgg16(num_classes = 365, weights=None)
         
     file_path = join("data", "pretrained_on_places", model_name + ".pth")
     if not os.path.exists(file_path):
