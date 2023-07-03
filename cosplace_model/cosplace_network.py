@@ -3,6 +3,7 @@ import logging
 import torchvision
 from torch import nn
 from torch.autograd import Function
+import os
 from os.path import join
 from typing import Tuple
 from google_drive_downloader import GoogleDriveDownloader as gdd
@@ -106,15 +107,15 @@ class GeoLocalizationNet(nn.Module):
 def get_pretrained_places_torchvision_model(backbone_name: str) -> torch.nn.Module:
     model_name = ''
     if backbone_name.startswith("resnet18"):
-        model_name = "resnet18_places.pth"
+        model_name = "resnet18_places"
         model = torchvision.models.resnet18(num_classes=365)
-        gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS["resnet18_places"], dest_path=file_path)
     elif backbone_name == "VGG16":
-        model_name = "vgg16_places.pth"
+        model_name = "vgg16_places"
         model = torchvision.models.vgg16(num_classes = 365)
-        gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS["vgg16_places"])
         
-    file_path = join("data", "pretrained_on_places", model_name)
+    file_path = join("data", "pretrained_on_places", model_name + ".pth")
+    if not os.path.exists(file_path):
+        gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS[model_name], dest_path=file_path)
     state_dict = torch.load(file_path, map_location=torch.device('cpu'))
     model.load_state_dict(state_dict)
     return model  
