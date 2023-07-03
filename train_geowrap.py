@@ -1,242 +1,201 @@
+import os
 import sys
 import torch
 import logging
+import argparse
 import numpy as np
 from tqdm import tqdm
-import multiprocessing
 from datetime import datetime
-import torchvision.transforms as T
+from torchvision.transforms.functional import hflip
 
-import test_geowarp
+import test
 import util
-import parser
-import commons
-import cosface_loss
-import augmentations
-from datasets.test_dataset import TestDataset
-from datasets.train_dataset import TrainDataset
 import geowarp
-import test_geowarp
+import commons
+import qp_dataset  # Used for weakly supervised losses, it yields query-positive pairs
+import geowarp_dataset  # Used to train the warping regressiong module in a self-supervised fashion
+import geoloc_dataset  # Used for testing
 
-torch.backends.cudnn.benchmark = True  # Provides a speedup
 
-args = parser.parse_arguments()
-start_time = datetime.now()
-args.output_folder = f"logs/{args.save_dir}/{start_time.strftime('%Y-%m-%d_%H-%M-%S')}"
-commons.make_deterministic(args.seed)
-commons.setup_logging(args.output_folder, console="debug")
-logging.info(" ".join(sys.argv))
-logging.info(f"Arguments: {args}")
-logging.info(f"The outputs are being saved in {args.output_folder}")
+def hor_flip(points):
+    """Flip points horizontally.
 
-import geowarp_dataset
+    Parameters
+    ----------
+    points : torch.Tensor of shape [B, 8, 2]
+    """
+    new_points = torch.zeros_like(points)
+    new_points[:, 0::2, :] = points[:, 1::2, :]
+    new_points[:, 1::2, :] = points[:, 0::2, :]
+    new_points[:, :, 0] *= -1
+    return new_points
 
-# #### Model
-# if args.domain_adapt == 'True':
-#     model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim,
-#                                                 alpha=0.05, domain_adapt="True")
-#     logging.info(f"Using domain adaption")
-# else:
-#     model = cosplace_network.GeoLocalizationNet(args.backbone, args.fc_output_dim, alpha=None, domain_adapt=None)
-#     logging.info(f"Using domain adaption")
 
-features_extractor = geowarp.FeatureExtractor(args.backbone, args.fc_output_dim)
-global_features_dim = commons.get_output_dim(features_extractor, "gem")
+def to_cuda(list_):
+    """Move to cuda all items of the list."""
+    return [item.cuda() for item in list_]
 
-logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
 
-if args.resume_model is not None:
-    logging.debug(f"Loading model from {args.resume_model}")
-    model_state_dict = torch.load(args.resume_model)
-    features_extractor.load_state_dict(model_state_dict)
-    del model_state_dict
+def compute_loss(loss, weight):
+    """Compute loss and gradients separately for each loss, and free the
+    computational graph to reduce memory consumption.
+    """
+    loss *= weight
+    loss.backward()
+    return loss.item()
 
-homography_regression = geowarp.HomographyRegression(kernel_sizes=args.kernel_sizes, channels=args.channels, padding=1)
-model = geowarp.GeoWarp(features_extractor, homography_regression).cuda().eval()
-model = torch.nn.DataParallel(model)
 
-#### Optimizer
-criterion = torch.nn.CrossEntropyLoss()
-mse = torch.nn.MSELoss()
-# UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
-if args.optimizer == "Adam":
-    model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-elif args.optimizer == "AdamW":
-    model_optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-elif args.optimizer == "SGD":
-    model_optimizer = torch.optim.SGD(model.parameters(), lr=args.lr)
-elif args.optimizer == "Adagrad":
-    model_optimizer = torch.optim.Adagrad(model.parameters(), lr=args.lr)
-elif args.optimizer == "LBFGS":
-    model_optimizer = torch.optim.LBFGS(model.parameters(), lr=args.lr)
-elif args.optimizer == "Adadelta":
-    model_optimizer = torch.optim.Adadelta(model.parameters(), lr=args.lr)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    # Training parameters
+    parser.add_argument("--lr", type=float, default=0.0001,
+                        help="learning rate")
+    parser.add_argument("--optim", type=str, default="sgd",
+                        choices=["adam", "sgd"],
+                        help="optimizer")
+    parser.add_argument("--n_epochs", type=int, default=100,
+                        help="epochs")
+    parser.add_argument("--iterations_per_epoch", type=int, default=500,
+                        help="how many iterations each epoch should last")
+    parser.add_argument("--k", type=int, default=0.6,
+                        help="parameter k, defining the difficulty of ss training data")
+    parser.add_argument("--ss_w", type=float, default=1,
+                        help="weight of self-supervised loss")
+    parser.add_argument("--consistency_w", type=float, default=0.1,
+                        help="weight of consistency loss")
+    parser.add_argument("--features_wise_w", type=float, default=10,
+                        help="weight of features-wise loss")
+    parser.add_argument("--qp_threshold", type=float, default=1.2,
+                        help="Threshold distance (in features space) for query-positive pairs")
+    parser.add_argument("--batch_size_ss", type=int, default=16,
+                        help="batch size for self-supervised loss")
+    parser.add_argument("--batch_size_consistency", type=int, default=16,
+                        help="batch size for consistency loss")
+    parser.add_argument("--batch_size_features_wise", type=int, default=16,
+                        help="batch size for features-wise loss")
+    parser.add_argument("--ss_num_workers", type=int, default=8,
+                        help="num_workers for self-supervised loss")
+    parser.add_argument("--qp_num_workers", type=int, default=4,
+                        help="num_workers for weakly supervised losses")
 
-### Scheduler
-if args.scheduler == 'StepLR':
-    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=30, gamma=0.1)
-elif args.scheduler == 'ReduceLROnPlateau':
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(model_optimizer, 'min')
-elif args.scheduler == 'CosineAnnealingLR':
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(model_optimizer, T_max=50, eta_min=0)
-# Add more elif conditions for other schedulers you want to use
-elif args.scheduler == 'ExponentialLR':
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(model_optimizer, gamma=0.95)
-else:
-    print("Invalid scheduler choice")
+    # Test parameters
+    parser.add_argument("--num_reranked_preds", type=int, default=5,
+                        help="number of predictions to re-rank at test time")
 
-#### Datasets
-groups = [TrainDataset(args, args.train_set_folder, M=args.M, alpha=args.alpha, N=args.N, L=args.L,
-                       current_group=n, min_images_per_class=args.min_images_per_class) for n in range(args.groups_num)]
-# Each group has its own classifier, which depends on the number of classes in the group
-classifiers = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups]
-# UPDATE: request f. adding or trying with a new optimizer from Adam to AdamW
-# classifiers_optimizers = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in classifiers]
-classifiers_optimizers = [torch.optim.AdamW(classifier.parameters(), lr=args.classifiers_lr) for classifier in
-                          classifiers]
-ss_dataset = [geowarp_dataset.HomographyDataset(args, args.train_set_folder, M=args.M, N=args.N, current_group=n, min_images_per_class=args.min_images_per_class, k=args.k) for n in range(args.groups_num)] # k = parameter k, defining the difficulty of ss training data, default = 0.6
+    # Model parameters
+    parser.add_argument("--arch", type=str, default="resnet50",
+                        choices=["alexnet", "vgg16", "resnet50"],
+                        help="model to use for the encoder")
+    parser.add_argument("--pooling", type=str, default="netvlad",
+                        choices=["netvlad", "gem"],
+                        help="pooling layer used in the baselines")
+    parser.add_argument("--kernel_sizes", nargs='+', default=[7, 5, 5, 5, 5, 5],
+                        help="size of kernels in conv layers of Homography Regression")
+    parser.add_argument("--channels", nargs='+', default=[225, 128, 128, 64, 64, 64, 64],
+                        help="num channels in conv layers of Homography Regression")
 
-logging.info(f"Using {len(groups)} groups")
-logging.info(f"The {len(groups)} groups have respectively the following number of classes {[len(g) for g in groups]}")
-logging.info(
-    f"The {len(groups)} groups have respectively the following number of images {[g.get_images_num() for g in groups]}")
+    # Others
+    parser.add_argument("--exp_name", type=str, default="default",
+                        help="name of generated folders with logs and checkpoints")
+    parser.add_argument("--resume_fe", type=str, default=None,
+                        help="path to resume for Feature Extractor")
+    parser.add_argument("--positive_dist_threshold", type=int, default=25,
+                        help="treshold distance for positives (in meters)")
+    parser.add_argument("--datasets_folder", type=str, default="../datasets",
+                        help="path with the datasets")
+    parser.add_argument("--dataset_name", type=str, default="pitts30k",
+                        help="name of folder with dataset")
 
-val_ds = TestDataset(args.val_set_folder, positive_dist_threshold=args.positive_dist_threshold)
-test_ds = TestDataset(args.test_set_folder, queries_folder="queries",
-                      positive_dist_threshold=args.positive_dist_threshold)
-logging.info(f"Validation set: {val_ds}")
-logging.info(f"Test set: {test_ds}")
+    args = parser.parse_args()
 
-# Dataset day label (1,1,1)
-groups_day = [TrainDataset(args, "/content/data/tokyo_xs/day_database/", M=args.M, alpha=args.alpha, N=args.N, L=args.L,
-                           current_group=n, min_images_per_class=args.min_images_per_class, day=True) for n in
-              range(args.groups_num)]
-# Each group has its own classifier, which depends on the number of classes in the group
-classifiers_day = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups_day]
-classifiers_optimizers_day = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in
-                              classifiers_day]
+    # Sanity check
+    if len(args.kernel_sizes) != len(args.channels) - 1:
+        raise ValueError("len(kernel_sizes) must be equal to len(channels)-1; "
+                         f"but you set them to {args.kernel_sizes} and {args.channels}")
 
-# How many classes and images for the day domain label prediction
-logging.info(f"Using {len(groups_day)} groups")
-logging.info(
-    f"The {len(groups_day)} groups have respectively the following number of classes {[len(g) for g in groups_day]}")
-logging.info(
-    f"The {len(groups_day)} groups have respectively the following number of images {[g.get_images_num() for g in groups_day]}")
+    # Setup
+    output_folder = f"runs/{args.exp_name}/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+    commons.setup_logging(output_folder)
+    logging.info("python " + " ".join(sys.argv))
+    logging.info(f"Arguments: {args}")
+    logging.info(f"The outputs are being saved in {output_folder}")
+    os.makedirs(f"{output_folder}/checkpoints")
+    start_time = datetime.now()
 
-logging.info(f"Day sunny trial group: {groups_day[0]} ")
+    ############### MODEL ###############
+    features_extractor = geowarp.FeaturesExtractor(args.arch, args.pooling)
+    global_features_dim = commons.get_output_dim(features_extractor, args.pooling)
 
-# Dataset night label (0,0,0)
-# path kaggle:  "/kaggle/working/data/tokyo_xs/night"
-# path to pc:
-groups_night = [TrainDataset(args, "/content/data/tokyo_xs/night_database/database",
-                             M=args.M, alpha=args.alpha, N=args.N, L=args.L, current_group=n,
-                             min_images_per_class=args.min_images_per_class, night=True) \
-                for n in range(args.groups_num)]
-# Each group has its own classifier, which depends on the number of classes in the group1
-classifiers_night = [cosface_loss.MarginCosineProduct(args.fc_output_dim, len(group)) for group in groups_night]
-classifiers_optimizers_night = [torch.optim.Adam(classifier.parameters(), lr=args.classifiers_lr) for classifier in
-                                classifiers_night]
+    if args.resume_fe is not None:
+        state_dict = torch.load(args.resume_fe)
+        features_extractor.load_state_dict(state_dict)
+        del state_dict
+    else:
+        logging.warning("WARNING: --resume_fe is set to None, meaning that the "
+                        "Feature Extractor is not initialized!")
 
-# How many classes and images for the night domain label prediction
-logging.info(f"Using {len(groups_night)} groups")
-logging.info(
-    f"The {len(groups_night)} groups have respectively the following number of classes {[len(g) for g in groups_night]}")
-logging.info(
-    f"The {len(groups_night)} groups have respectively the following number of images {[g.get_images_num() for g in groups_night]}")
+    homography_regression = geowarp.HomographyRegression(kernel_sizes=args.kernel_sizes, channels=args.channels,
+                                                         padding=1)
+    model = geowarp.Network(features_extractor, homography_regression).cuda().eval()
+    model = torch.nn.DataParallel(model)
+    ############### MODEL ###############
 
-logging.info(f"Day night version trial group: {groups_night[0]} ")
+    ############### DATASETS & DATALOADERS ###############
+    geoloc_train_dataset = geoloc_dataset.GeolocDataset(args.datasets_folder, args.dataset_name, split="train",
+                                                        positive_dist_threshold=args.positive_dist_threshold)
+    logging.info(f"Geoloc train set: {geoloc_train_dataset}")
+    geoloc_test_dataset = geoloc_dataset.GeolocDataset(args.datasets_folder, args.dataset_name, split="test",
+                                                       positive_dist_threshold=args.positive_dist_threshold)
+    logging.info(f"Geoloc test set: {geoloc_test_dataset}")
 
-#### Resume
-if args.resume_train:
-    model, model_optimizer, classifiers, classifiers_optimizers, best_val_recall1, start_epoch_num = \
-        util.resume_train(args, args.output_folder, model, model_optimizer, classifiers, classifiers_optimizers)
-    model = model.to(args.device)
-    epoch_num = start_epoch_num - 1
-    logging.info(
-        f"Resuming from epoch {start_epoch_num} with best R@1 {best_val_recall1:.1f} from checkpoint {args.resume_train}")
-else:
-    best_val_recall1 = start_epoch_num = 0
-
-#### Train / evaluation loop
-logging.info("Start training ...")
-logging.info(f"There are {len(groups[0])} classes for the first group, " +
-             f"each epoch has {args.iterations_per_epoch} iterations " +
-             f"with batch_size {args.batch_size}, therefore the model sees each class (on average) " +
-             f"{args.iterations_per_epoch * args.batch_size / len(groups[0]):.1f} times per epoch")
-
-if args.augmentation_device == "cuda":
-    compose = []
-    compose.append(augmentations.DeviceAgnosticColorJitter(brightness=args.brightness,
-                                                           contrast=args.contrast,
-                                                           saturation=args.saturation,
-                                                           hue=args.hue))
-    compose.append(augmentations.DeviceAgnosticRandomResizedCrop([512, 512],
-                                                                 scale=[1 - args.random_resized_crop, 1]))
-    compose.append(augmentations.DeviceAgnosticRandomHorizontalFlip(args.horizontal_flip_prob))
-    compose.append(T.RandomVerticalFlip(args.vertical_flip_prob))
-    if args.autoaugment_policy:
-        for policy_name in args.autoaugment_policy:  # it can be more than one
-            logging.info(f"Selected AutoAugment policy: {policy_name}")
-            compose.append(augmentations.DeviceAgnosticAutoAugment(policy_name=policy_name,
-                                                                   interpolation=T.InterpolationMode.NEAREST))
-    compose.append(T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]))
-
-    gpu_augmentation = T.Compose(compose)
-
-if args.use_amp16:
-    scaler = torch.cuda.amp.GradScaler()
-
-# START TRAINING
-for epoch_num in range(start_epoch_num, args.epochs_num):
-    #### Train
-    epoch_start_time = datetime.now()  # rn date
-    # Select classifier and dataloader according to epoch
-    current_group_num = epoch_num % args.groups_num
-    classifiers[current_group_num] = classifiers[current_group_num].to(args.device)
-    util.move_to_device(classifiers_optimizers[current_group_num], args.device)
-    dataloader = commons.InfiniteDataLoader(groups[current_group_num], num_workers=args.num_workers,
-                                            batch_size=args.batch_size, shuffle=True,
-                                            pin_memory=(args.device == "cuda"), drop_last=True)
-    # batch size = 32,same as cosplace to iterate in the dataset
-    dataloader_iterator = iter(dataloader)
-    # now i use the new one
-    # same things but for the two different datasets
-    ss_dataloader = commons.InfiniteDataLoader(ss_dataset[current_group_num], num_workers=args.num_workers,
-                                               batch_size=args.batch_size, shuffle=True,
-                                               pin_memory=(args.device == "cuda"), drop_last=True)
+    ss_dataset = geowarp_dataset.HomographyDataset(root_path=f"{args.datasets_folder}/{args.dataset_name}/images/train",
+                                                k=args.k)
+    ss_dataloader = commons.InfiniteDataLoader(ss_dataset, shuffle=True, batch_size=args.batch_size_ss,
+                                               num_workers=args.ss_num_workers, pin_memory=True, drop_last=True)
     ss_data_iter = iter(ss_dataloader)
 
-    model = model.train()  # training mode
-    # epoch_losses = np.zeros((0, 3), dtype=np.float32)
-    # epoch_losses = np.zeros((0, 1), dtype=np.float32)
-    epoch_losses = np.zeros((0, 2), dtype=np.float32)
-    for iteration in tqdm(range(args.iterations_per_epoch), ncols=100):
-        images, targets, _ = next(dataloader_iterator)
-        images, targets = images.to(args.device), targets.to(args.device)
+    if args.consistency_w != 0 or args.features_wise_w != 0:
+        dataset_qp = qp_dataset.DatasetQP(model, global_features_dim, geoloc_train_dataset,
+                                          qp_threshold=args.qp_threshold)
+        dataloader_qp = commons.InfiniteDataLoader(dataset_qp, shuffle=True,
+                                                   batch_size=max(args.batch_size_consistency,
+                                                                  args.batch_size_features_wise),
+                                                   num_workers=args.qp_num_workers, pin_memory=True, drop_last=True)
+        data_iter_qp = iter(dataloader_qp)
+    ############### DATASETS & DATALOADERS ###############
 
-        if args.augmentation_device == "cuda":
-            images = gpu_augmentation(images)
+    ############### LOSS & OPTIMIZER ###############
+    mse = torch.nn.MSELoss()
+    if args.optim == "adam":
+        optim = torch.optim.Adam(homography_regression.parameters(), lr=args.lr)
+    elif args.optim == "sgd":
+        optim = torch.optim.SGD(homography_regression.parameters(), lr=args.lr, momentum=0.9, weight_decay=0.001)
+    ############### LOSS & OPTIMIZER ###############
 
-        # warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = to_cuda(next(ss_data_iter))
-        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = next(
-            ss_data_iter)  # dal warping dataset prende le due immagini warped e i due punti delle intersezioni
-        warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = warped_img_1.to(
-            args.device), warped_img_2.to(args.device), warped_intersection_points_1.to(
-            args.device), warped_intersection_points_2.to(args.device)  # warping dataset
+    ############### TRAIN ###############
+    for epoch in range(args.n_epochs):
 
-        with torch.no_grad():
-            similarity_matrix_1to2, similarity_matrix_2to1 = model("similarity", [warped_img_1, warped_img_2])
+        homography_regression = homography_regression.train()
+        epoch_losses = np.zeros((0, 3), dtype=np.float32)
 
-        model_optimizer.zero_grad()  # setta il gradiente a zero per evitare double counting (passaggio classico dopo ogni iterazione)
-        classifiers_optimizers[current_group_num].zero_grad()
+        for iteration in tqdm(range(args.iterations_per_epoch), desc=f"Train epoch {epoch}", ncols=100):
+            warped_img_1, warped_img_2, warped_intersection_points_1, warped_intersection_points_2 = to_cuda(
+                next(ss_data_iter))
+            if args.consistency_w != 0 or args.features_wise_w != 0:
+                queries, positives = to_cuda(next(data_iter_qp))
 
-        if not args.use_amp16:
-            descriptors = model("features_extractor", [images, "global"])
-            output = classifiers[current_group_num](descriptors, targets)
-            loss = criterion(output, targets)
-            loss.backward()
-            loss = loss.item()
-            del output, images
+            with torch.no_grad():
+                similarity_matrix_1to2, similarity_matrix_2to1 = model("similarity", [warped_img_1, warped_img_2])
+                if args.consistency_w != 0:
+                    queries_cons = queries[:args.batch_size_consistency]
+                    positives_cons = positives[:args.batch_size_consistency]
+                    similarity_matrix_q2p, similarity_matrix_p2q = model("similarity", [queries_cons, positives_cons])
+                    fl_similarity_matrix_q2p, fl_similarity_matrix_p2q = model("similarity", [hflip(queries_cons),
+                                                                                              hflip(positives_cons)])
+                    del queries_cons, positives_cons
+
+            optim.zero_grad()
+
             # ss_loss
             if args.ss_w != 0:
                 pred_warped_intersection_points_1 = model("regression", similarity_matrix_1to2)
@@ -245,62 +204,76 @@ for epoch_num in range(start_epoch_num, args.epochs_num):
                            mse(pred_warped_intersection_points_1[:, 4:], warped_intersection_points_2) +
                            mse(pred_warped_intersection_points_2[:, :4], warped_intersection_points_2) +
                            mse(pred_warped_intersection_points_2[:, 4:], warped_intersection_points_1))
-                # ss_loss = compute_loss(ss_loss, args.ss_w)
-                ss_loss.backward()
-                ss_loss = ss_loss.item()
+                ss_loss = compute_loss(ss_loss, args.ss_w)
                 del pred_warped_intersection_points_1, pred_warped_intersection_points_2
             else:
                 ss_loss = 0
-            epoch_losses = np.concatenate((epoch_losses, np.array([[loss, ss_loss]])))  # both losses
-            del loss, ss_loss
-            # step update
-            model_optimizer.step()
-            classifiers_optimizers[current_group_num].step()
-            model_optimizer.step()
-        else:  # Use AMP 16
-            with torch.cuda.amp.autocast():
-                descriptors = model("features_extractor", [images, "global"])
-                output = classifiers[current_group_num](descriptors, targets)
-                loss = criterion(output, targets)
-            scaler.scale(loss).backward()
-            epoch_losses = np.append(epoch_losses, loss.item())
-            del loss, output, images
-            scaler.step(model_optimizer)
-            scaler.step(classifiers_optimizers[current_group_num])
-            scaler.update()
 
-            # remember to concatenate both losses
-            epoch_losses = np.concatenate((epoch_losses, np.array([[loss, ss_loss]])))  # both losses
-            del loss, ss_loss
-    classifiers[current_group_num] = classifiers[current_group_num].cpu()
-    util.move_to_device(classifiers_optimizers[current_group_num], "cpu")
-    logging.debug(f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, "
-                  f"loss = {epoch_losses.mean():.4f}")
+            # consistency_loss
+            if args.consistency_w != 0:
+                pred_intersection_points_q2p = model("regression", similarity_matrix_q2p)
+                pred_intersection_points_p2q = model("regression", similarity_matrix_p2q)
+                fl_pred_intersection_points_q2p = model("regression", fl_similarity_matrix_q2p)
+                fl_pred_intersection_points_p2q = model("regression", fl_similarity_matrix_p2q)
+                four_predicted_points = [
+                    torch.cat((pred_intersection_points_q2p[:, 4:], pred_intersection_points_q2p[:, :4]), 1),
+                    pred_intersection_points_p2q,
+                    hor_flip(
+                        torch.cat((fl_pred_intersection_points_q2p[:, 4:], fl_pred_intersection_points_q2p[:, :4]), 1)),
+                    hor_flip(fl_pred_intersection_points_p2q)
+                ]
+                four_predicted_points_centroids = torch.cat([p[None] for p in four_predicted_points]).mean(0).detach()
+                consistency_loss = sum([mse(pred, four_predicted_points_centroids) for pred in four_predicted_points])
+                consistency_loss = compute_loss(consistency_loss, args.consistency_w)
+                del pred_intersection_points_q2p, pred_intersection_points_p2q
+                del fl_pred_intersection_points_q2p, fl_pred_intersection_points_p2q
+                del four_predicted_points
+            else:
+                consistency_loss = 0
 
-    ### Evaluation (still in the for - delete the ())
-    recalls, recalls_str, _ = test_geowarp.use_geowarp(args, val_ds, model)
-    logging.info(
-        f"Epoch {epoch_num:02d} in {str(datetime.now() - epoch_start_time)[:-7]}, {val_ds}: {recalls_str[:20]}")
-    is_best = recalls[0] > best_val_recall1
-    best_val_recall1 = max(recalls[0], best_val_recall1)
-    # Save checkpoint, which contains all training parameters
-    util.save_checkpoint({
-        "epoch_num": epoch_num + 1,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": model_optimizer.state_dict(),
-        "classifiers_state_dict": [c.state_dict() for c in classifiers],
-        "optimizers_state_dict": [c.state_dict() for c in classifiers_optimizers],
-        "best_val_recall1": best_val_recall1
-    }, is_best, args.output_folder)
-    #### end of evaluation
-    ### end of training.
+            # features_wise_loss
+            if args.features_wise_w != 0:
+                queries_fw = queries[:args.batch_size_features_wise]
+                positives_fw = positives[:args.batch_size_features_wise]
+                # Add random weights to avoid numerical instability
+                random_weights = (torch.rand(args.batch_size_features_wise, 4) ** 0.1).cuda()
+                w_queries, w_positives, _, _ = geowarp_dataset.compute_warping(model, queries_fw, positives_fw,
+                                                                            weights=random_weights)
+                f_queries = model("features_extractor", [w_queries, "local"])
+                f_positives = model("features_extractor", [w_positives, "local"])
+                features_wise_loss = compute_loss(mse(f_queries, f_positives), args.features_wise_w)
+                del queries, positives, queries_fw, positives_fw, w_queries, w_positives, f_queries, f_positives
+            else:
+                features_wise_loss = 0
 
-logging.info(f"Trained for {epoch_num + 1:02d} epochs, in total in {str(datetime.now() - start_time)[:-7]}")
+            epoch_losses = np.concatenate((epoch_losses, np.array([[ss_loss, consistency_loss, features_wise_loss]])))
+            optim.step()
 
-#### Test best model on test set v1
-best_model_state_dict = torch.load(f"{args.output_folder}/best_model.pth")
-model.load_state_dict(best_model_state_dict)
+        epoch_losses_means = epoch_losses.mean()
 
-logging.info(f"Now testing on the test set: {test_ds}")
-recalls, recalls_str = test_geowarp.test(args, test_ds, model)
-logging.info("Experiment finished (without any errors)")
+
+        def format_(array):
+            return " - ".join([f"{e:.4f}" for e in array])
+
+
+        logging.debug(
+            f"epoch: {epoch:>3} / {args.n_epochs}, losses: {epoch_losses_means:.4f} ({format_(epoch_losses.mean(0))})")
+        torch.save(homography_regression.state_dict(),
+                   f"{output_folder}/checkpoints/homography_regression_{epoch:03d}.torch")
+
+        logging.debug(f"Current total loss = {epoch_losses_means:.4f}")
+    ############### TRAIN ###############
+
+    ############### TEST ###############
+    logging.info(f"The training is over in {str(datetime.now() - start_time)[:-7]}, now it's test time")
+
+    homography_regression = homography_regression.eval()
+
+    test_baseline_recalls, test_baseline_recalls_pretty_str, test_baseline_predictions, _, _ = \
+        util.compute_features(geoloc_test_dataset, model, global_features_dim)
+    logging.info(f"baseline test: {test_baseline_recalls_pretty_str}")
+    _, reranked_test_recalls_pretty_str = test.test(model, test_baseline_predictions, geoloc_test_dataset,
+                                                    num_reranked_predictions=args.num_reranked_preds,
+                                                    recall_values=[1, 5, 10, 20])
+    logging.info(f"test after warping - {reranked_test_recalls_pretty_str}")
+    ############### TEST ###############
