@@ -6,7 +6,6 @@ from torch.autograd import Function
 import os
 from os.path import join
 from typing import Tuple
-from google_drive_downloader import GoogleDriveDownloader as gdd
 
 from cosplace_model.layers import Flatten, L2Norm, GeM
 
@@ -35,12 +34,6 @@ class RevGrad(nn.Module):
 
     def forward(self, x):
         return GradientReversalFunction.apply(x, self.alpha)
-    
-# Pretrained models on Google Landmarks v2 and Places 365
-PRETRAINED_MODELS = {
-    'resnet18_places'  : '1DnEQXhmPxtBUrRc81nAvT8z17bk-GBj5',
-    'vgg16_places'     : '1UWl1uz6rZ6Nqmp1K5z3GHAIZJmDh4bDu'
-}
 
 
 
@@ -57,11 +50,16 @@ CHANNELS_NUM_IN_LAST_CONV = {
     "vit_l_32": 1024,
     "vit_h_14": 1280,
     "efficientnet_v2_s": 1280,
+    "efficientnet_b0": 1280,
+    "efficientnet_b1": 1280,
+    "efficientnet_b2": 1408,
+    "mobilenet_v3_small": 576,
+    "mobilenet_v3_large": 960,
 }
 
 
 class GeoLocalizationNet(nn.Module):
-    def __init__(self, backbone: str, fc_output_dim: int, places: bool, alpha: float = None, domain_adapt: str = None):
+    def __init__(self, backbone: str, fc_output_dim: int, alpha: float = None, domain_adapt: str = None):
         """Return a model for GeoLocalization.
         
         Args:
@@ -72,7 +70,7 @@ class GeoLocalizationNet(nn.Module):
         self.alpha = alpha
         self.domain_adapt = domain_adapt
         assert backbone in CHANNELS_NUM_IN_LAST_CONV, f"backbone must be one of {list(CHANNELS_NUM_IN_LAST_CONV.keys())}"
-        self.backbone, features_dim = get_backbone(backbone, places)
+        self.backbone, features_dim = get_backbone(backbone)
         self.aggregation = nn.Sequential(
             L2Norm(),
             GeM(),
@@ -103,22 +101,6 @@ class GeoLocalizationNet(nn.Module):
         else:
             x = self.aggregation(x)  # etichette UTM
             return x
-        
-def get_pretrained_places_torchvision_model(backbone_name: str) -> torch.nn.Module:
-    model_name = ''
-    if backbone_name.startswith("ResNet18"):
-        model_name = "resnet18_places"
-        model = torchvision.models.resnet18(num_classes=365, weights=None)
-    elif backbone_name == "VGG16":
-        model_name = "vgg16_places"
-        model = torchvision.models.vgg16(num_classes = 365, weights=None)
-        
-    file_path = join("data", "pretrained_on_places", model_name + ".pth")
-    if not os.path.exists(file_path):
-        gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS[model_name], dest_path=file_path)
-    state_dict = torch.load(file_path, map_location=torch.device('cpu'))
-    model.load_state_dict(state_dict)
-    return model  
 
 
 def get_pretrained_torchvision_model(backbone_name: str) -> torch.nn.Module:
@@ -133,11 +115,8 @@ def get_pretrained_torchvision_model(backbone_name: str) -> torch.nn.Module:
     return model
 
 
-def get_backbone(backbone_name : str, places: bool) -> Tuple[torch.nn.Module, int]:
-    if places:
-        backbone = get_pretrained_places_torchvision_model(backbone_name)
-    else:
-        backbone = get_pretrained_torchvision_model(backbone_name)
+def get_backbone(backbone_name : str) -> Tuple[torch.nn.Module, int]:
+    backbone = get_pretrained_torchvision_model(backbone_name)
     if backbone_name.startswith("ResNet"):
         for name, child in backbone.named_children():
             if name == "layer3":  # Freeze layers before conv_3

@@ -18,7 +18,6 @@ def parse_arguments(is_training: bool = True):
                                  "efficientnet_v2_s", "efficientnet_b0", "efficientnet_b1", "efficientnet_b2", "mobilenet_v3_small", "mobilenet_v3_large"], help="_")
     parser.add_argument("--fc_output_dim", type=int, default=512,
                         help="Output dimension of final fully connected layer")
-    parser.add_argument("--use_places", action="store_true", help="get Backbone pretrained with places dataset (works only with ResNet18 and VGG16)")
     # Optimizer
     parser.add_argument("--optimizer", type=str, default='AdamW',
                         choices=["AdamW","Adam","SGD","Adagrad","LBFGS","Adadelta"],
