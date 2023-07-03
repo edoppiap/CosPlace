@@ -79,7 +79,8 @@ if __name__ == "__main__":
     parser.add_argument("--qp_num_workers", type=int, default=4,
                         help="num_workers for weakly supervised losses")
     parser.add_argument("--groups_num", type=int, default=8, help="_")
-
+    parser.add_argument("--dataset_folder", type=str, default=None,
+                        help="path of the folder with train/val/test sets")
 
     # Test parameters
     parser.add_argument("--num_reranked_preds", type=int, default=5,
@@ -109,7 +110,31 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_name", type=str, default="pitts30k",
                         help="name of folder with dataset")
 
+
     args = parser.parse_args()
+
+    if args.dataset_folder is None:
+        try:
+            args.dataset_folder = os.environ['SF_XL_PROCESSED_FOLDER']
+        except KeyError:
+            raise Exception("You should set parameter --dataset_folder or export " +
+                            "the SF_XL_PROCESSED_FOLDER environment variable as such \n" +
+                            "export SF_XL_PROCESSED_FOLDER=/path/to/sf_xl/processed")
+
+    if not os.path.exists(args.dataset_folder):
+        raise FileNotFoundError(f"Folder {args.dataset_folder} does not exist")
+
+    args.train_set_folder = os.path.join(args.dataset_folder, "train")
+    if not os.path.exists(args.train_set_folder):
+        raise FileNotFoundError(f"Folder {args.train_set_folder} does not exist")
+
+    args.val_set_folder = os.path.join(args.dataset_folder, "val")
+    if not os.path.exists(args.val_set_folder):
+         raise FileNotFoundError(f"Folder {args.val_set_folder} does not exist")
+
+    args.test_set_folder = os.path.join(args.dataset_folder, "test")
+    if not os.path.exists(args.test_set_folder):
+        raise FileNotFoundError(f"Folder {args.test_set_folder} does not exist")
 
     # Sanity check
     if len(args.kernel_sizes) != len(args.channels) - 1:
