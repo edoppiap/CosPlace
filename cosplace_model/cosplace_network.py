@@ -6,7 +6,7 @@ from torch.autograd import Function
 import os
 from os.path import join
 from typing import Tuple
-from google_drive_downloader import GoogleDriveDownloader as gdd
+from torchvision.models.utils import load_state_dict_from_url
 
 from cosplace_model.layers import Flatten, L2Norm, GeM
 
@@ -108,14 +108,16 @@ def get_pretrained_places_torchvision_model(backbone_name: str) -> torch.nn.Modu
     model_name = ''
     if backbone_name.startswith("ResNet18"):
         model_name = "resnet18_places"
-        model = torchvision.models.resnet18(num_classes=365)
+        model = torchvision.models.resnet18(num_classes=365, pretrained=False)
     elif backbone_name == "VGG16":
         model_name = "vgg16_places"
-        model = torchvision.models.vgg16(num_classes = 365)
+        model = torchvision.models.vgg16(num_classes = 365, pretrained=False)
         
     file_path = join("data", "pretrained_on_places", model_name + ".pth")
     if not os.path.exists(file_path):
-        gdd.download_file_from_google_drive(file_id=PRETRAINED_MODELS[model_name], dest_path=file_path)
+        url = f"https://drive.google.com/uc?export=download&id={PRETRAINED_MODELS[model_name]}"
+        state_dict = load_state_dict_from_url(url, progress=True)
+        torch.save(state_dict, file_path)
     state_dict = torch.load(file_path, map_location=torch.device('cpu'))
     model.load_state_dict(state_dict)
     return model  
