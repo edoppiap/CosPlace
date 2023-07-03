@@ -1,13 +1,20 @@
+# Code from https://github.com/gmberton/geo_warp
 import torch
 import kornia
-import random
-from glob import glob
-from shapely.geometry import Polygon
 import os
+import random
 import torchvision.transforms as T
+from PIL import Image
+from shapely.geometry import Polygon
+import logging
+import numpy as np
 
-import geowarp_dataset_util
 
+def open_image(path):
+    return Image.open(path).convert("RGB")
+
+
+# DATASET FOR WARPING
 def get_random_trapezoid(k=1):
     """Get the points (with shape [4, 2] of a random trapezoid with two vertical sides.
     With k=0, the trapezoid is a rectangle with points:
@@ -25,7 +32,13 @@ def get_random_trapezoid(k=1):
 
     left = -rand(k)
     right = rand(k)
-    return torch.tensor([(left, -rand(k)), (right, -rand(k)), (right, rand(k)), (left, rand(k))])
+
+    trap_points = np.empty(shape=(4, 2))
+    trap_points[0] = (left, -rand(k))
+    trap_points[1] = (right, -rand(k))
+    trap_points[2] = (right, rand(k))
+    trap_points[3] = (left, rand(k))
+    return trap_points
 
 
 def compute_warping(model, tensor_img_1, tensor_img_2, weights=None):
@@ -41,7 +54,6 @@ def compute_warping(model, tensor_img_1, tensor_img_2, weights=None):
     tensor_img_2 : torch.Tensor, the gallery images, with shape [B, 3, H, W].
     weights : torch.Tensor, random weights to avoid numerical instability,
         usually they're not needed.
-
     Returns
     -------
     warped_tensor_img_1 : torch.Tensor, the warped query images, with shape [B, 3, H, W].
@@ -52,12 +64,13 @@ def compute_warping(model, tensor_img_1, tensor_img_2, weights=None):
         on the gallery images, with shape [B, 4, 2]
     """
     # Get both predictions
-    pred_points_1to2, pred_points_2to1 = model("similarity_and_regression", [tensor_img_1, tensor_img_2])
+    pred_points_1to2, pred_points_2to1 = model("similarity_and_regression",
+                                               [tensor_img_1, tensor_img_2])  # images are predictions
     # Average them
     mean_pred_points_1 = (pred_points_1to2[:, :4] + pred_points_2to1[:, 4:]) / 2
     mean_pred_points_2 = (pred_points_1to2[:, 4:] + pred_points_2to1[:, :4]) / 2
     # Apply the homography
-    warped_tensor_img_1, _ = warp_images(tensor_img_1, mean_pred_points_1, weights)
+    warped_tensor_img_1, _ = warp_images(tensor_img_1, mean_pred_points_1, weights)  # warp
     warped_tensor_img_2, _ = warp_images(tensor_img_2, mean_pred_points_2, weights)
     return warped_tensor_img_1, warped_tensor_img_2, mean_pred_points_1, mean_pred_points_2
 
@@ -69,8 +82,7 @@ def warp_images(tensor_img, warping_points, weights=None):
     ----------
     tensor_img : torch.Tensor, the images, with shape [B, 3, H, W].
     warping_points : torch.Tensor, the points used to compute homography, with shape [B, 4, 2]
-    weights : torch.Tensor, random weights to avoid numerical instability,
-        usually they're not needed.
+    weights : torch.Tensor, random weights to avoid numerical instability, usually they're not needed.
 
     Returns
     -------
@@ -79,10 +91,10 @@ def warp_images(tensor_img, warping_points, weights=None):
     """
     B, C, H, W = tensor_img.shape
     assert warping_points.shape == torch.Size([B, 4, 2])
-    rectangle_points = torch.repeat_interleave(get_random_trapezoid(k=0).unsqueeze(0), B, 0)
+    rectangle_points = torch.repeat_interleave(torch.tensor(get_random_trapezoid(k=0)).unsqueeze(0), B, 0)
     rectangle_points = rectangle_points.to(tensor_img.device)
     # NB for older versions of kornia use kornia.find_homography_dlt
-    theta = kornia.geometry.homography.find_homography_dlt(rectangle_points, warping_points, weights)
+    theta = kornia.geometry.homography.find_homography_dlt(rectangle_points.float(), warping_points.float(), weights)
     # NB for older versions of kornia use kornia.homography_warp
     warped_images = kornia.geometry.homography_warp(tensor_img, theta, dsize=(H, W))
     return warped_images, theta
@@ -100,11 +112,12 @@ def get_random_homographic_pair(source_img, k, is_debugging=False):
     is_debugging : bool, if True return extra information
 
     """
-
     # Compute two random trapezoids and their intersection
     trap_points_1 = get_random_trapezoid(k)
     trap_points_2 = get_random_trapezoid(k)
-    points_trapezoids = torch.cat((trap_points_1.unsqueeze(0), trap_points_2.unsqueeze(0)))
+    t1 = torch.tensor(trap_points_1)
+    t2 = torch.tensor(trap_points_2)
+    points_trapezoids = torch.cat((t1.unsqueeze(0), t2.unsqueeze(0)))
     trap_1 = Polygon(trap_points_1)
     trap_2 = Polygon(trap_points_2)
     intersection = trap_2.intersection(trap_1)
@@ -175,3 +188,18 @@ class HomographyDataset(torch.utils.data.Dataset):
             T.ToTensor(),
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
+
+    def __getitem__(self, class_num):
+        # This function takes as input the class_num instead of the index of
+        # the image. This way each class is equally represented during warping.
+
+        class_id = self.classes_ids[class_num]
+        image_path = random.choice(self.images_per_class[class_id])
+
+        pil_image = open_image(image_path)
+        tensor_image = self.base_transform(pil_image)
+        return get_random_homographic_pair(tensor_image, self.k, is_debugging=self.is_debugging)
+
+    def __len__(self):
+        """Return the number of homography classes within this group."""
+        return len(self.classes_ids)
