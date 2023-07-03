@@ -43,7 +43,7 @@ Since we are using Geo Warp model has to be different
 '''
 # train.py of geo_warp
 ############### MODEL ###############
-features_extractor = geowarp.FeatureExtractor(args.backbone, args.fc_output_dim)
+features_extractor = geowarp.FeaturesExtractor(args.backbone, args.fc_output_dim)
 global_features_dim = commons.get_output_dim(features_extractor, "gem")
 
 logging.info(f"There are {torch.cuda.device_count()} GPUs and {multiprocessing.cpu_count()} CPUs.")
